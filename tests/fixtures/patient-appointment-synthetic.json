@@ -1,0 +1,13 @@
+{
+  "data_classification": "synthetic-test-data",
+  "patient": {
+    "id": "SYNTHETIC-PATIENT-001",
+    "display_name": "Example Patient"
+  },
+  "appointment": {
+    "id": "SYNTHETIC-APPOINTMENT-001",
+    "patient_id": "SYNTHETIC-PATIENT-001",
+    "status": "scheduled",
+    "starts_at": "2030-01-15T10:00:00Z"
+  }
+}

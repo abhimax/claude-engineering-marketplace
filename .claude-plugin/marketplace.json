@@ -1,0 +1,14 @@
+{
+  "name": "claude-engineering-marketplace",
+  "description": "Private engineering plugin marketplace for organization-approved Claude Code tools.",
+  "owner": {
+    "name": "Engineering Organization"
+  },
+  "plugins": [
+    {
+      "name": "hipaa-p2-review",
+      "source": "./plugins/hipaa-p2-review",
+      "description": "Report-only healthcare security and organization-policy code review aid."
+    }
+  ]
+}

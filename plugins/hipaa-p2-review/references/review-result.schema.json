@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Healthcare Pull Request Review Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "review_status",
+    "summary",
+    "findings",
+    "uncertainties"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0.0"
+    },
+    "review_status": {
+      "enum": ["complete", "incomplete"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/finding"
+      }
+    },
+    "uncertainties": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "severity",
+        "severity_rationale",
+        "confidence",
+        "title",
+        "location",
+        "evidence",
+        "impact",
+        "remediation",
+        "human_verification_required"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^HPR-[0-9]{3,}$"
+        },
+        "category": {
+          "enum": [
+            "phi_exposure",
+            "authentication_authorization",
+            "object_level_authorization",
+            "service_to_service_access",
+            "sensitive_data_handling",
+            "secrets_management",
+            "injection_input_handling",
+            "data_integrity_tenant_isolation",
+            "missing_security_control",
+            "other"
+          ]
+        },
+        "severity": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "severity_rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "enum": ["high", "medium", "low"]
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "start_line", "end_line"],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "start_line": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "end_line": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "remediation": {
+          "type": "string",
+          "minLength": 1
+        },
+        "human_verification_required": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

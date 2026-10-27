@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+
+repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+node "$repository_root/scripts/validate-marketplace.mjs" "$repository_root"
+
+if ! command -v claude >/dev/null 2>&1; then
+  printf '%s\n' 'ERROR: Claude Code CLI is required for authoritative manifest and component validation.' >&2
+  printf '%s\n' 'Install Claude Code, then rerun ./scripts/validate-marketplace.' >&2
+  exit 1
+fi
+
+claude plugin validate "$repository_root" --strict
+claude plugin validate "$repository_root/plugins/hipaa-p2-review" --strict

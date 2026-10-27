@@ -1,0 +1,8 @@
+{
+  "name": "hipaa-p2-review",
+  "version": "0.1.0",
+  "description": "Report-only healthcare security and organization-policy code review aid for backend changes.",
+  "author": {
+    "name": "Engineering Organization"
+  }
+}
