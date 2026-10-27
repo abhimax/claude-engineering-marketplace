@@ -20,6 +20,8 @@ jobs:
           node-version: 22
       - name: Install locked development dependencies
         run: npm ci
+      - name: Type-check TypeScript
+        run: npm run typecheck
       - name: Run structural validation tests
         run: npm test
       - name: Install Claude Code CLI

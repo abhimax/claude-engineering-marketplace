@@ -3,16 +3,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import Ajv2020 from 'ajv/dist/2020.js';
-import { validateMarketplace } from '../scripts/validate-marketplace.mjs';
+import { Ajv2020, type AnySchema } from 'ajv/dist/2020.js';
+import { validateMarketplace } from '../scripts/validate-marketplace.ts';
 
-const resultSchema = JSON.parse(fs.readFileSync(new URL('../plugins/hipaa-p2-review/references/review-result.schema.json', import.meta.url), 'utf8'));
+interface SyntheticFixture {
+  data_classification: string;
+  patient: { id: string };
+  appointment: { id: string; patient_id: string };
+}
+
+const resultSchema = JSON.parse(fs.readFileSync(new URL('../plugins/hipaa-p2-review/references/review-result.schema.json', import.meta.url), 'utf8')) as AnySchema;
 const validateReviewResult = new Ajv2020({ allErrors: true }).compile(resultSchema);
 
-function createFixture() {
+function createFixture(): { root: string; pluginRoot: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'marketplace-validator-'));
   const pluginRoot = path.join(root, 'plugins', 'synthetic-review');
-  const write = (relativePath, contents) => {
+  const write = (relativePath: string, contents: string): void => {
     const filePath = path.join(root, relativePath);
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.writeFileSync(filePath, contents);
@@ -35,7 +41,7 @@ function createFixture() {
     'README.md',
     'CONTRIBUTING.md',
     'tests/README.md',
-    'tests/validate-marketplace.test.mjs',
+    'tests/validate-marketplace.test.ts',
     'package.json',
     'scripts/validate-marketplace',
     '.github/workflows/validate-marketplace.yml'
@@ -59,7 +65,7 @@ test('rejects duplicate plugin identifiers', (context) => {
   const fixture = createFixture();
   context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
   const manifestPath = path.join(fixture.root, '.claude-plugin', 'marketplace.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { plugins: Array<Record<string, unknown>> };
   manifest.plugins.push({ ...manifest.plugins[0] });
   fs.writeFileSync(manifestPath, JSON.stringify(manifest));
   assert.match(validateMarketplace(fixture.root).join('\n'), /duplicate plugin identifier/);
@@ -77,7 +83,7 @@ test('rejects traversal and missing source directories', (context) => {
   const fixture = createFixture();
   context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
   const manifestPath = path.join(fixture.root, '.claude-plugin', 'marketplace.json');
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { plugins: Array<{ source: string }> };
   manifest.plugins[0].source = './../outside';
   fs.writeFileSync(manifestPath, JSON.stringify(manifest));
   assert.match(validateMarketplace(fixture.root).join('\n'), /safe marketplace-root relative path/);
@@ -129,12 +135,12 @@ test('rejects findings missing evidence location or verification fields', () => 
     uncertainties: []
   };
   assert.equal(validateReviewResult(result), false);
-  assert.ok(validateReviewResult.errors.some((error) => error.keyword === 'required' && error.params.missingProperty === 'location'));
-  assert.ok(validateReviewResult.errors.some((error) => error.keyword === 'required' && error.params.missingProperty === 'human_verification_required'));
+  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'location'));
+  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'human_verification_required'));
 });
 
 test('uses only explicitly synthetic patient and appointment fixture data', () => {
-  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/patient-appointment-synthetic.json', import.meta.url), 'utf8'));
+  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/patient-appointment-synthetic.json', import.meta.url), 'utf8')) as SyntheticFixture;
   assert.equal(fixture.data_classification, 'synthetic-test-data');
   assert.match(fixture.patient.id, /^SYNTHETIC-/);
   assert.match(fixture.appointment.id, /^SYNTHETIC-/);

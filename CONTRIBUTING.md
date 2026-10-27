@@ -22,6 +22,7 @@ Install the locked test dependency once, then run from the repository root:
 
 ```sh
 npm ci
+npm run typecheck
 npm test
 ./scripts/validate-marketplace
 ```

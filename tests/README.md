@@ -1,9 +1,10 @@
 # Validation Tests
 
-Install the locked development dependencies and run the structural-validator and JSON Schema tests from the repository root:
+Install the locked development dependencies, type-check the TypeScript, and run the structural-validator and JSON Schema tests from the repository root:
 
 ```sh
 npm ci
+npm run typecheck
 npm test
 ```
 

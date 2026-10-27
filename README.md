@@ -29,7 +29,7 @@ Add future plugins under `plugins/<plugin-name>/` with their own `.claude-plugin
 ## Prerequisites
 
 - Node.js 22+ and npm for structural and output-schema tests.
-- Run `npm ci` once to install the locked Ajv development dependency used to validate review-result JSON in tests.
+- Run `npm ci` once to install the locked TypeScript, `tsx`, Node.js type definitions, and Ajv development dependencies.
 - Current Claude Code CLI for authoritative plugin/marketplace validation and local installation. The CLI's validator does not require an authenticated review session.
 - Git and read access to the private repository for Git-based marketplace distribution.
 - For the GitHub Actions secret scan on this organization-owned repository, configure the Gitleaks Action license as the encrypted `GITLEAKS_LICENSE` repository or organization secret. No secret value belongs in this repository.
@@ -42,11 +42,12 @@ From the repository root:
 
 ```sh
 npm ci
+npm run typecheck
 npm test
 ./scripts/validate-marketplace
 ```
 
-The shared script runs repository structure checks followed by the official strict marketplace and plugin validation commands. The Node tests cover catalog duplicates, source paths, manifest-name agreement, and component frontmatter. They do not prove model behavior.
+The shared script runs the TypeScript structural validator followed by the official strict marketplace and plugin validation commands. The tests cover catalog duplicates, source paths, manifest-name agreement, component frontmatter, and the finding JSON Schema. They do not prove model behavior.
 
 For a one-session local load without installing:
 
