@@ -14,10 +14,10 @@ Shared posting procedure for the `/hipaa-review` and `/post-hipaa-review` comman
 ## 1. Render the dry run
 
 ```bash
-source /tmp/hipaa-p2-review/plugin.env && { [ -f /tmp/hipaa-p2-review/state.env ] && source /tmp/hipaa-p2-review/state.env; } ; node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" /tmp/hipaa-p2-review/review-result.json
+source /tmp/hipaa-p2-review/plugin.env && { [ -f /tmp/hipaa-p2-review/state.env ] && source /tmp/hipaa-p2-review/state.env; } ; node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" --repo-root "$(git rev-parse --show-toplevel)" --diff /tmp/hipaa-p2-review/pr.diff /tmp/hipaa-p2-review/review-result.json
 ```
 
-A non-zero exit means the result failed schema validation or exceeds a limit; stop and show the `ERROR:` line. Otherwise show the rendered Markdown exactly as printed.
+Run it from the checked-out PR so `--repo-root` points at the reviewed code. A non-zero exit means the result failed schema validation, cites a file or line that does not exist in the checkout (usually a position inside the diff instead of a file line), or exceeds a limit; stop and show the `ERROR:` line. Otherwise show the rendered Markdown exactly as printed.
 
 ## 2. Approval
 
@@ -50,7 +50,7 @@ If neither token variable is set but the `gh` CLI is authenticated, supply its t
 Run as one Bash call:
 
 ```bash
-source /tmp/hipaa-p2-review/plugin.env && { [ -f /tmp/hipaa-p2-review/state.env ] && source /tmp/hipaa-p2-review/state.env; } ; PR_NUMBER=<n> node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" --post /tmp/hipaa-p2-review/review-result.json
+source /tmp/hipaa-p2-review/plugin.env && { [ -f /tmp/hipaa-p2-review/state.env ] && source /tmp/hipaa-p2-review/state.env; } ; PR_NUMBER=<n> node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" --post --repo-root "$(git rev-parse --show-toplevel)" --diff /tmp/hipaa-p2-review/pr.diff /tmp/hipaa-p2-review/review-result.json
 ```
 
 Prefix `PR_COMMENT_APPROVED=true` only for approval options 2 and 4, and `GH_TOKEN="$(gh auth token)"` only when step 3 calls for it. On success the script prints one line such as `GitHub PR comment created on owner/repo#42 with 2 warning(s): <url>`; relay it. On failure, show the `ERROR:` line and stop. Do not retry with a different mechanism.
@@ -58,6 +58,7 @@ Prefix `PR_COMMENT_APPROVED=true` only for approval options 2 and 4, and `GH_TOK
 | Error | Meaning |
 |---|---|
 | `Posting is disabled unless …` | No approval: the PR lacks the opt-in label and no other approval applies |
+| `Finding locations do not match the checked-out files` | A finding cites a missing file or a line past the end of the file; the reviewer must correct it |
 | `A GitHub token is required` | No `GH_TOKEN`/`GITHUB_TOKEN`; inject the platform's `GITHUB-TOKEN` secret |
 | `HTTP 401` / `HTTP 403` | Token expired, or lacking `Issues: read/write` on the repository |
 | `HTTP 404` | Wrong repository or PR number, or the token cannot see the repository |

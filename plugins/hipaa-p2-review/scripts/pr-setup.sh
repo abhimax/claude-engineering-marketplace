@@ -11,6 +11,7 @@
 # Outputs (in /tmp/hipaa-p2-review/):
 #   state.env          MODE (pr|local), PR_NUMBER, BASE_REF, HEAD_SHA, REPOSITORY
 #   pr.diff            unified diff of merge-base(origin/BASE_REF)..HEAD
+#   pr.numbered.diff   the same diff with new-file line numbers in a left column
 #   changed-files.txt  name-status list for the same range
 
 set -euo pipefail
@@ -18,7 +19,7 @@ set -euo pipefail
 OUT=/tmp/hipaa-p2-review
 mkdir -p "$OUT"
 # Clear run-scoped files so a reused container never posts a previous run's result.
-rm -f "$OUT/state.env" "$OUT/pr.diff" "$OUT/changed-files.txt" "$OUT/review-result.json"
+rm -f "$OUT/state.env" "$OUT/pr.diff" "$OUT/pr.numbered.diff" "$OUT/changed-files.txt" "$OUT/review-result.json"
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "ERROR: not inside a git repository" >&2; exit 1; }
 
@@ -67,6 +68,19 @@ git fetch --quiet origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF
 
 git diff "origin/${BASE_REF}...HEAD" > "$OUT/pr.diff"
 git diff --name-status "origin/${BASE_REF}...HEAD" > "$OUT/changed-files.txt"
+
+# Same diff with each added/context line prefixed by its line number in the new file. Reading pr.diff
+# directly yields positions within the diff, which reviewers then misreport as file line numbers.
+awk '
+  /^diff --git / { in_header = 1; print; next }
+  in_header && /^@@ / { in_header = 0 }
+  in_header { print; next }
+  /^@@ / { match($0, /\+[0-9]+/); line = substr($0, RSTART + 1, RLENGTH - 1) + 0; print; next }
+  /^\+/ { printf "%6d | %s\n", line, $0; line++; next }
+  /^ /  { printf "%6d | %s\n", line, $0; line++; next }
+  /^-/  { printf "%6s | %s\n", "", $0; next }
+  { print }
+' "$OUT/pr.diff" > "$OUT/pr.numbered.diff"
 
 REMOTE=$(git remote get-url origin 2>/dev/null | sed -E 's|https?://[^@/]+@|https://|' || true)
 REPOSITORY=$(printf '%s' "$REMOTE" | sed -E 's#^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)##; s#\.git$##; s#/$##')

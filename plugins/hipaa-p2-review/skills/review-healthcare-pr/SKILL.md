@@ -52,7 +52,7 @@ Run as one Bash call (omit `PR_NUMBER=` when no number was given):
 source /tmp/hipaa-p2-review/plugin.env && PR_NUMBER=<n> bash "$HIPAA_PLUGIN_ROOT/scripts/pr-setup.sh"
 ```
 
-It checks out the PR head (detached) when needed, fetches the base, and writes `/tmp/hipaa-p2-review/state.env`, `pr.diff`, and `changed-files.txt`. If it fails, show the `ERROR:` line and stop. `MODE=local` means no PR was found: review the branch, but do not post.
+It checks out the PR head (detached) when needed, fetches the base, and writes `/tmp/hipaa-p2-review/state.env`, `pr.diff`, `pr.numbered.diff`, and `changed-files.txt`. If it fails, show the `ERROR:` line and stop. `MODE=local` means no PR was found: review the branch, but do not post.
 
 If `DIFF_BYTES` is 0, report that there is nothing to review and stop. If it is above about 1,000,000, tell the reviewer that it must mark the result `incomplete` if it cannot cover every changed file.
 
@@ -61,7 +61,7 @@ If `DIFF_BYTES` is 0, report that there is nothing to review and stop. If it is 
 Spawn the `hipaa-p2-review:hipaa-p2-reviewer` agent once. Its prompt gives:
 
 - the repository root, `REPOSITORY`, the PR number (or "local branch"), `BASE_REF`, and `HEAD_SHA` from step 1;
-- `/tmp/hipaa-p2-review/pr.diff` and `/tmp/hipaa-p2-review/changed-files.txt` as the review scope, read with its Read tool;
+- `/tmp/hipaa-p2-review/pr.numbered.diff` and `/tmp/hipaa-p2-review/changed-files.txt` as the review scope, read with its Read tool. Say explicitly: the number before `|` on each diff line is the line number in the new file; cite those numbers (or numbers from reading the file itself), never the line numbers the Read tool shows for the diff file;
 - the absolute paths `$HIPAA_PLUGIN_ROOT/references/review-procedure.md`, `review-policy.md`, `finding-format.md`, and `review-result.schema.json` (expanded from `plugin.env`) to read before reviewing;
 - the SCA/scanner report paths from the arguments, or a plain statement that no scanner output was supplied;
 - the instruction to return only the JSON object defined by the schema.
@@ -72,7 +72,7 @@ Do not add your own findings or opinions to that prompt.
 
 Write the agent's JSON to `/tmp/hipaa-p2-review/review-result.json` exactly as returned. Removing a surrounding Markdown code fence is the only change allowed. Then follow step 1 of `$HIPAA_PLUGIN_ROOT/references/pr-comment-publishing.md` to validate and render the dry run.
 
-If validation fails, send the `ERROR:` line back to the same reviewer agent once and ask for a corrected JSON object. If it fails again, stop and report the error. Never fix findings yourself.
+If validation fails (schema or finding locations), send the `ERROR:` line back to the reviewer once and ask for a corrected JSON object: continue the same agent if you can, otherwise spawn it again with the previous JSON and the error. If it fails again, stop and report the error. Never fix findings or line numbers yourself.
 
 ## 4. Post
 

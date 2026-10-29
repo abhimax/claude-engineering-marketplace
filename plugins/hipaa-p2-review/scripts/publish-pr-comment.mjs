@@ -4,6 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import nodePath from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** @typedef {Record<string, unknown>} JsonSchema */
@@ -428,6 +429,97 @@ export function assertPostApproval(approved) {
   }
 }
 
+// Reviewers reading a diff file tend to cite positions within the diff instead of file lines, so every
+// location is checked against the checked-out PR head before anything is rendered or posted.
+/**
+ * @typedef {object} DiffFile
+ * @property {Set<number>} added new-file line numbers added by the diff
+ * @property {Map<number, number>} addedAtPosition diff-file position (1-based) -> new-file line, for added lines
+ */
+
+/**
+ * @param {string} diffText unified diff as written by pr-setup.sh
+ * @returns {Map<string, DiffFile>} keyed by new-file path
+ */
+export function parseUnifiedDiff(diffText) {
+  /** @type {Map<string, DiffFile>} */
+  const files = new Map();
+  /** @type {DiffFile | null} */
+  let current = null;
+  let inHeader = false;
+  let line = 0;
+  diffText.split('\n').forEach((raw, index) => {
+    if (raw.startsWith('diff --git ')) {
+      current = { added: new Set(), addedAtPosition: new Map() };
+      inHeader = true;
+      return;
+    }
+    if (!current) return;
+    if (inHeader && !raw.startsWith('@@')) {
+      if (raw.startsWith('+++ b/')) files.set(raw.slice('+++ b/'.length), current);
+      return;
+    }
+    inHeader = false;
+    if (raw.startsWith('@@')) {
+      line = Number(raw.match(/\+(\d+)/)?.[1] ?? 0);
+    } else if (raw.startsWith('+')) {
+      current.added.add(line);
+      current.addedAtPosition.set(index + 1, line);
+      line += 1;
+    } else if (raw.startsWith(' ')) {
+      line += 1;
+    }
+  });
+  return files;
+}
+
+/**
+ * @param {ReviewResult} review
+ * @param {string} repoRoot
+ * @param {string} [diffText] pr.diff; enables detection of diff positions cited as file lines
+ */
+export async function checkFindingLocations(review, repoRoot, diffText) {
+  const diffFiles = diffText ? parseUnifiedDiff(diffText) : new Map();
+  const root = nodePath.resolve(repoRoot);
+  /** @type {string[]} */
+  const errors = [];
+  for (const finding of review.findings) {
+    const { path, start_line: start, end_line: end } = finding.location;
+    if (start > end) errors.push(`${finding.id}: start_line ${start} is after end_line ${end}`);
+    const absolute = nodePath.resolve(root, path);
+    if (nodePath.isAbsolute(path) || !absolute.startsWith(root + nodePath.sep)) {
+      errors.push(`${finding.id}: path ${path} must be relative to the repository root`);
+      continue;
+    }
+    let text;
+    try {
+      text = await fs.readFile(absolute, 'utf8');
+    } catch {
+      errors.push(`${finding.id}: ${path} does not exist in the checked-out PR head`);
+      continue;
+    }
+    const lineCount = text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+    if (end > lineCount) {
+      errors.push(`${finding.id}: ${path} has ${lineCount} lines but the finding cites line ${end}`);
+      continue;
+    }
+    // In range but possibly still a diff position: the cited lines touch no change in the file, while the
+    // same number read as a pr.diff position lands on a line this file adds.
+    const diffFile = diffFiles.get(path);
+    if (diffFile) {
+      let touchesChange = false;
+      for (let cited = start; cited <= end && !touchesChange; cited += 1) touchesChange = diffFile.added.has(cited);
+      const likelyLine = diffFile.addedAtPosition.get(start);
+      if (!touchesChange && likelyLine !== undefined) {
+        errors.push(`${finding.id}: ${path} line ${start} is not a changed line, but position ${start} in the diff is this file's added line ${likelyLine}; cite the file line number`);
+      }
+    }
+  }
+  if (errors.length > 0) {
+    throw new Error(`Finding locations do not match the checked-out files (use the new-file line numbers from pr.numbered.diff or the file itself, not positions in the diff): ${errors.join('; ')}`);
+  }
+}
+
 // A PR label is approval only when GitHub reports it on the PR itself. Applying a label needs
 // triage/write access, so PR text or the model cannot grant it.
 /**
@@ -601,14 +693,28 @@ async function readInput(inputPath) {
  */
 async function main(args) {
   const post = args.includes('--post');
-  const positional = args.filter((arg) => arg !== '--post');
-  if (positional.length !== 1) {
-    throw new Error('Usage: node publish-pr-comment.mjs [--post] <review.json|->');
+  /** @type {Record<string, string | undefined>} */
+  const options = {};
+  /** @type {string[]} */
+  const positional = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--repo-root' || args[index] === '--diff') {
+      options[args[index]] = args[index + 1];
+      index += 1;
+    } else if (args[index] !== '--post') {
+      positional.push(args[index]);
+    }
+  }
+  const repoRoot = options['--repo-root'];
+  const diffPath = options['--diff'];
+  if (positional.length !== 1 || ('--repo-root' in options && !repoRoot) || ('--diff' in options && (!diffPath || !repoRoot))) {
+    throw new Error('Usage: node publish-pr-comment.mjs [--post] [--repo-root <dir> [--diff <pr.diff>]] <review.json|->');
   }
 
   /** @type {unknown} */
   const input = JSON.parse(await readInput(positional[0]));
   const review = parseReviewResult(input);
+  if (repoRoot) await checkFindingLocations(review, repoRoot, diffPath ? await fs.readFile(diffPath, 'utf8') : undefined);
   /** @type {RenderContext} */
   const context = {
     repository: process.env.GITHUB_REPOSITORY || repositoryFromRemote(readOriginRemote()),

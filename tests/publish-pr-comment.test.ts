@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { Ajv2020, type AnySchema } from 'ajv/dist/2020.js';
 import {
   assertPostApproval,
+  checkFindingLocations,
   parseReviewResult,
   publishReviewComment,
   renderReviewComment,
@@ -304,4 +307,57 @@ test('shows reviewer URLs and paths as inline code without backslashes or live l
   assert.ok(body.includes('`patient-service/src/config/env.ts#L67`'));
   assert.ok(body.includes('(see &#35;12) and &#64;someone said so.'));
   assert.doesNotMatch(body, /patient\\-service|ingest\\\./);
+});
+
+test('rejects finding locations that are diff positions rather than file lines', async (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hipaa-locations-'));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, 'src', 'patient'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'patient', 'log.ts'), Array.from({ length: 25 }, (_, index) => `line ${index + 1}`).join('\n') + '\n');
+  const withLocation = (location: { path: string; start_line: number; end_line: number }) => parseReviewResult({
+    ...sampleReview,
+    findings: [{ ...sampleReview.findings[0], location }]
+  });
+
+  await checkFindingLocations(sampleReview, root);
+  await checkFindingLocations(withLocation({ path: 'src/patient/log.ts', start_line: 25, end_line: 25 }), root);
+  await assert.rejects(
+    checkFindingLocations(withLocation({ path: 'src/patient/log.ts', start_line: 193, end_line: 206 }), root),
+    /pr\.numbered\.diff.*HPR-001: src\/patient\/log\.ts has 25 lines but the finding cites line 206/
+  );
+  await assert.rejects(checkFindingLocations(withLocation({ path: 'src/missing.ts', start_line: 1, end_line: 1 }), root), /does not exist/);
+  await assert.rejects(checkFindingLocations(withLocation({ path: '../outside.ts', start_line: 1, end_line: 1 }), root), /relative to the repository root/);
+  await assert.rejects(checkFindingLocations(withLocation({ path: 'src/patient/log.ts', start_line: 9, end_line: 3 }), root), /start_line 9 is after end_line 3/);
+});
+
+test('rejects in-range lines that are really positions in the diff file', async (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hipaa-diffpos-'));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const fileLines = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`);
+  fileLines[25] = 'console.log(phone_number);';
+  fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'src', 'controller.ts'), fileLines.join('\n') + '\n');
+  // Position 8 of this diff is the added line, which is line 26 of the file.
+  const diff = [
+    'diff --git a/src/controller.ts b/src/controller.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/controller.ts',
+    '+++ b/src/controller.ts',
+    '@@ -24,4 +24,5 @@ export class Controller {',
+    ' line 24',
+    ' line 25',
+    '+console.log(phone_number);',
+    ' line 27',
+    ' line 28'
+  ].join('\n') + '\n';
+  const withLines = (start: number, end: number) => parseReviewResult({
+    ...sampleReview,
+    findings: [{ ...sampleReview.findings[0], location: { path: 'src/controller.ts', start_line: start, end_line: end } }]
+  });
+
+  await checkFindingLocations(withLines(26, 26), root, diff);
+  await checkFindingLocations(withLines(25, 27), root, diff);
+  await checkFindingLocations(withLines(3, 3), root, diff);
+  await assert.rejects(checkFindingLocations(withLines(8, 8), root, diff), /line 8 is not a changed line, but position 8 in the diff is this file's added line 26/);
+  await checkFindingLocations(withLines(8, 8), root);
 });
