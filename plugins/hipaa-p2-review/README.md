@@ -4,10 +4,11 @@ This Claude Code plugin packages a read-only healthcare PR review agent, the `re
 
 ## Contents
 
-- `commands/hipaa-review.md`: `/hipaa-p2-review:hipaa-review [pr-number] [sca-report...]` collects the PR diff, runs the reviewer, validates the result, shows a dry run, and posts after approval.
+- `skills/review-healthcare-pr/SKILL.md`: `/hipaa-p2-review:review-healthcare-pr [pr-number] [--approved] [sca-report...]` collects the PR diff, runs the reviewer, validates the result, shows a dry run, and posts after approval.
+- `commands/hipaa-review.md`: `/hipaa-p2-review:hipaa-review`, an alias for the skill.
 - `commands/post-hipaa-review.md`: `/hipaa-p2-review:post-hipaa-review <pr-number> [result.json]` posts a saved result (user-invoked only).
 - `agents/hipaa-p2-reviewer.md`: constrained read-only agent.
-- `skills/review-healthcare-pr/SKILL.md`: review workflow.
+- `references/review-procedure.md`: the reviewer agent's six-area review steps.
 - `scripts/publish-pr-comment.mjs`: schema-validating PR comment publisher (Node.js 18+, no dependencies).
 - `references/review-policy.md`: the six-area review scope and evidence boundaries.
 - `references/finding-format.md` and `references/review-result.schema.json`: JSON output contract.
@@ -35,18 +36,18 @@ The organization must approve the AI execution environment, data-processing arra
 
 ## Commenting on the PR
 
-`/hipaa-review` follows the same split as the pr-reviewer plugin: the top-level session orchestrates, the review sub-agent analyses, and a real script posts. Concretely, it:
+`/hipaa-p2-review:review-healthcare-pr` (or its alias `/hipaa-p2-review:hipaa-review`) follows the same split as the pr-reviewer plugin: the top-level session orchestrates, the review sub-agent analyses, and a real script posts. Concretely, it:
 
 1. Finds the plugin root (on headless runners `CLAUDE_PLUGIN_ROOT` is often unset in Bash) and checks that `node` 18+ is available.
 2. Runs `scripts/pr-setup.sh`: resolves the PR, checks out its head (detached) if the runner cloned another branch, fetches the base, and writes the diff to `/tmp/hipaa-p2-review/`.
 3. Spawns `hipaa-p2-review:hipaa-p2-reviewer` with the diff paths, reference paths, and any SCA reports, and saves its JSON to `/tmp/hipaa-p2-review/review-result.json`.
 4. Validates the JSON and renders the comment locally (dry run).
-5. Posts only when approved: `PR_COMMENT_APPROVED=true` from the platform, `--approved` passed by the platform rule, or an explicit yes in an interactive session. Otherwise it stops at the dry run.
+5. Posts only when approved: `PR_COMMENT_APPROVED=true` from the platform, `--approved` in the invocation, the `ai-dlc/pr/hipaa-p2-review` label on the PR (checked on GitHub by the publisher), or an explicit yes in an interactive session. Otherwise it stops at the dry run.
 6. Creates, or on reruns updates, one marked top-level PR comment.
 
 ### Automated trigger (Xianix / AI-DLC agent)
 
-Add this execution block to the agent's `rules.json`. Applying the `ai-dlc/pr/hipaa-p2-review` label is the human opt-in that `--approved` records. Only people who are allowed to publish review content on the PR should be able to apply the label.
+Add this execution block to the agent's `rules.json`. Applying the `ai-dlc/pr/hipaa-p2-review` label is the human opt-in; the publisher verifies the label on the PR before posting, so `--approved` is optional. Only people who are allowed to publish review content on the PR should be able to apply the label.
 
 ```json
 {
@@ -75,7 +76,7 @@ Add this execution block to the agent's `rules.json`. Applying the `ai-dlc/pr/hi
 }
 ```
 
-The `execute-prompt` must invoke the command. A prompt that only asks for the `hipaa-p2-reviewer` agent or the `review-healthcare-pr` skill produces JSON and never posts. The `GITHUB-TOKEN` secret is re-exported as `GITHUB_TOKEN`, which both `gh` and the publisher read, and it needs `Issues: read/write` (plus read access to pull requests and contents). The comment is authored by the token's account. The `reopened` rule is optional; without it, closing and reopening a PR does not trigger a review. To re-run a review, remove and re-apply the label or push a commit.
+The `execute-prompt` may invoke either `/hipaa-p2-review:review-healthcare-pr {{pr-number}}` or `/hipaa-p2-review:hipaa-review {{pr-number}}`; both run the full flow and post. The `GITHUB-TOKEN` secret is re-exported as `GITHUB_TOKEN`, which both `gh` and the publisher read, and it needs `Issues: read/write` (plus read access to pull requests and contents). The comment is authored by the token's account. The `reopened` rule is optional; without it, closing and reopening a PR does not trigger a review. To re-run a review, remove and re-apply the label or push a commit.
 
 The publisher can also run on its own:
 

@@ -59,7 +59,7 @@ For a one-session local load without installing:
 claude --plugin-dir ./plugins/hipaa-p2-review
 ```
 
-The agent is namespaced `hipaa-p2-review:hipaa-p2-reviewer`; the skill is `/hipaa-p2-review:review-healthcare-pr`. Run `/hipaa-p2-review:hipaa-review [pr-number]` to review a PR and, after you approve the rendered report, post it as a PR comment (automated platforms pass `--approved`; see the plugin README for the `rules.json` block); `/hipaa-p2-review:post-hipaa-review <pr-number>` posts a saved result. The identifier remains unchanged for install compatibility. Use only approved synthetic inputs. Behavior evaluations need human-reviewed synthetic test cases before any deployment gate is considered.
+The agent is namespaced `hipaa-p2-review:hipaa-p2-reviewer`; the skill is `/hipaa-p2-review:review-healthcare-pr`. Run `/hipaa-p2-review:review-healthcare-pr [pr-number]` (alias `/hipaa-p2-review:hipaa-review`) to review a PR and post the report as a PR comment once approved: by you interactively, or on automated runs by the `ai-dlc/pr/hipaa-p2-review` label on the PR (see the plugin README for the `rules.json` block); `/hipaa-p2-review:post-hipaa-review <pr-number>` posts a saved result. The identifier remains unchanged for install compatibility. Use only approved synthetic inputs. Behavior evaluations need human-reviewed synthetic test cases before any deployment gate is considered.
 
 ## Add and Install the Local Marketplace
 

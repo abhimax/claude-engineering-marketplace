@@ -37,6 +37,7 @@ function createFixture(): { root: string; pluginRoot: string } {
   write('plugins/synthetic-review/references/finding-format.md', 'Synthetic output contract.\n');
   write('plugins/synthetic-review/references/review-result.schema.json', '{}');
   write('plugins/synthetic-review/references/pr-comment-publishing.md', 'Synthetic publishing procedure.\n');
+  write('plugins/synthetic-review/references/review-procedure.md', 'Synthetic review procedure.\n');
   write('plugins/synthetic-review/scripts/publish-pr-comment.mjs', 'export {};\n');
   write('plugins/synthetic-review/scripts/pr-setup.sh', '#!/usr/bin/env bash\n');
   write('plugins/synthetic-review/commands/hipaa-review.md', '---\nname: review\ndescription: Synthetic command\n---\nInstructions.\n');

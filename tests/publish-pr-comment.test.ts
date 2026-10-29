@@ -8,6 +8,7 @@ import {
   publishReviewComment,
   renderReviewComment,
   repositoryFromRemote,
+  resolvePostApproval,
   resolvePublisherConfig,
   validatePublisherConfig,
   type PublisherConfig
@@ -249,4 +250,21 @@ test('fails closed when repository or author identity cannot be resolved', async
     resolvePublisherConfig({ PR_NUMBER: '42', GITHUB_REPOSITORY: 'example/healthcare-api' }, failingFetch),
     /token is required/
   );
+});
+
+test('approves posting from the environment or the PR opt-in label, and refuses otherwise', async () => {
+  const requested: string[] = [];
+  const labelsFetch = (names: string[]): typeof fetch => async (input, init) => {
+    const request = new Request(input, init);
+    requested.push(request.url);
+    if (request.url.endsWith('/issues/42/labels?per_page=100')) return jsonResponse(names.map((name) => ({ name })));
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  };
+
+  assert.equal(await resolvePostApproval({ PR_COMMENT_APPROVED: 'true' }, baseConfig, labelsFetch([])), 'environment');
+  assert.equal(requested.length, 0);
+  assert.equal(await resolvePostApproval({}, baseConfig, labelsFetch(['ai-dlc/pr/hipaa-p2-review'])), 'label');
+  assert.equal(await resolvePostApproval({ HIPAA_REVIEW_APPROVAL_LABEL: 'custom/opt-in' }, baseConfig, labelsFetch(['custom/opt-in'])), 'label');
+  await assert.rejects(resolvePostApproval({}, baseConfig, labelsFetch(['ai-dlc/pr/pr-review'])), /PR_COMMENT_APPROVED=true.*'ai-dlc\/pr\/hipaa-p2-review' label/);
+  await assert.rejects(resolvePostApproval({ PR_COMMENT_APPROVED: 'false' }, baseConfig, labelsFetch([])), /label/);
 });

@@ -15,6 +15,7 @@ const commentMarker = '<!-- healthcare-data-review -->';
 const apiVersion = '2026-03-10';
 const maxInputBytes = 2_000_000;
 const maxCommentCharacters = 60_000;
+const defaultApprovalLabel = 'ai-dlc/pr/hipaa-p2-review';
 
 /**
  * @typedef {object} ReviewLocation
@@ -321,6 +322,37 @@ export function assertPostApproval(approved) {
   }
 }
 
+// A PR label is approval only when GitHub reports it on the PR itself. Applying a label needs
+// triage/write access, so PR text or the model cannot grant it.
+/**
+ * @param {PublisherConfig} config
+ * @param {string} label
+ * @param {Fetcher} [fetcher]
+ * @returns {Promise<boolean>}
+ */
+export async function hasApprovalLabel(config, label, fetcher = fetch) {
+  validatePublisherConfig(config);
+  const { owner, repo } = repositoryParts(config.repository);
+  const url = new URL(`repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${config.pullRequestNumber}/labels`, getApiBase(config.apiUrl));
+  url.searchParams.set('per_page', '100');
+  /** @type {Array<{ name?: string }>} */
+  const labels = await requestJson(url, { method: 'GET', headers: apiHeaders(config.token) }, fetcher);
+  return labels.some((item) => item.name === label);
+}
+
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @param {PublisherConfig} config
+ * @param {Fetcher} [fetcher]
+ * @returns {Promise<'environment' | 'label'>}
+ */
+export async function resolvePostApproval(env, config, fetcher = fetch) {
+  if (env.PR_COMMENT_APPROVED === 'true') return 'environment';
+  const label = env.HIPAA_REVIEW_APPROVAL_LABEL || defaultApprovalLabel;
+  if (await hasApprovalLabel(config, label, fetcher)) return 'label';
+  throw new Error(`Posting is disabled unless PR_COMMENT_APPROVED=true is explicitly set after human review or the PR has the '${label}' label.`);
+}
+
 /**
  * @param {unknown} input
  * @returns {ReviewResult}
@@ -476,9 +508,9 @@ async function main(args) {
     process.stderr.write('Dry run only. No GitHub request was made.\n');
     return;
   }
-  assertPostApproval(process.env.PR_COMMENT_APPROVED);
-
   const config = await resolvePublisherConfig(process.env);
+  const approval = await resolvePostApproval(process.env, config);
+  process.stderr.write(`Posting approved by ${approval === 'label' ? 'PR opt-in label' : 'PR_COMMENT_APPROVED'}.\n`);
   const result = await publishReviewComment(review, config);
   const destination = result.url ? ': ' + result.url : '.';
   console.log(`GitHub PR comment ${result.action} on ${config.repository}#${config.pullRequestNumber} with ${review.findings.length} warning(s)${destination}`);
