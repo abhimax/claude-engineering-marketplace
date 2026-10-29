@@ -11,7 +11,7 @@ import {
   resolvePublisherConfig,
   validatePublisherConfig,
   type PublisherConfig
-} from '../plugins/hipaa-p2-review/scripts/publish-pr-comment.mts';
+} from '../plugins/hipaa-p2-review/scripts/publish-pr-comment.mjs';
 
 const sampleReview = parseReviewResult({
   schema_version: '2.0.0',

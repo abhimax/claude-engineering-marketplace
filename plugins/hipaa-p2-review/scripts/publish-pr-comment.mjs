@@ -1,61 +1,70 @@
-// Dependency-free so it runs from the installed plugin cache with `node` (22.18+ strips types natively).
+// @ts-check
+// Plain JavaScript with no dependencies so it runs from the installed plugin cache on any Node.js 18+,
+// whatever runtime the reviewed repository pins.
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import fs from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
-type JsonSchema = Record<string, unknown>;
+/** @typedef {Record<string, unknown>} JsonSchema */
 
 const schemaUrl = new URL('../references/review-result.schema.json', import.meta.url);
-const reviewSchema = JSON.parse(await fs.readFile(schemaUrl, 'utf8')) as JsonSchema;
+/** @type {JsonSchema} */
+const reviewSchema = JSON.parse(await fs.readFile(schemaUrl, 'utf8'));
 const commentMarker = '<!-- healthcare-data-review -->';
 const apiVersion = '2026-03-10';
 const maxInputBytes = 2_000_000;
 const maxCommentCharacters = 60_000;
 
-interface ReviewLocation {
-  path: string;
-  start_line: number;
-  end_line: number;
-}
+/**
+ * @typedef {object} ReviewLocation
+ * @property {string} path
+ * @property {number} start_line
+ * @property {number} end_line
+ */
 
-interface ReviewFinding {
-  id: string;
-  alert: 'warning';
-  category: string;
-  evidence_status: 'confirmed' | 'potential';
-  confidence: 'high' | 'medium' | 'low';
-  title: string;
-  location: ReviewLocation;
-  evidence: string;
-  risk: string;
-  recommendation: string;
-  human_verification_required: boolean;
-}
+/**
+ * @typedef {object} ReviewFinding
+ * @property {string} id
+ * @property {'warning'} alert
+ * @property {string} category
+ * @property {'confirmed' | 'potential'} evidence_status
+ * @property {'high' | 'medium' | 'low'} confidence
+ * @property {string} title
+ * @property {ReviewLocation} location
+ * @property {string} evidence
+ * @property {string} risk
+ * @property {string} recommendation
+ * @property {boolean} human_verification_required
+ */
 
-export interface ReviewResult {
-  schema_version: '2.0.0';
-  review_status: 'complete' | 'incomplete';
-  summary: string;
-  findings: ReviewFinding[];
-  uncertainties: string[];
-}
+/**
+ * @typedef {object} ReviewResult
+ * @property {'2.0.0'} schema_version
+ * @property {'complete' | 'incomplete'} review_status
+ * @property {string} summary
+ * @property {ReviewFinding[]} findings
+ * @property {string[]} uncertainties
+ */
 
-interface GitHubComment {
-  id: number;
-  body: string;
-  user?: { login?: string } | null;
-  html_url?: string;
-}
+/**
+ * @typedef {object} GitHubComment
+ * @property {number} id
+ * @property {string} body
+ * @property {{ login?: string } | null} [user]
+ * @property {string} [html_url]
+ */
 
-export interface PublisherConfig {
-  token: string;
-  repository: string;
-  pullRequestNumber: number;
-  expectedAuthor: string;
-  apiUrl?: string;
-}
+/**
+ * @typedef {object} PublisherConfig
+ * @property {string} token
+ * @property {string} repository
+ * @property {number} pullRequestNumber
+ * @property {string} expectedAuthor
+ * @property {string} [apiUrl]
+ */
 
-type Fetcher = typeof fetch;
+/** @typedef {typeof fetch} Fetcher */
 
 // Interprets only the JSON Schema keywords review-result.schema.json uses, and refuses any other
 // keyword so a schema change cannot silently weaken validation.
@@ -64,11 +73,19 @@ const supportedKeywords = new Set([
   'properties', 'items', 'minLength', 'minimum', 'pattern'
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function resolveSchema(schema: JsonSchema): JsonSchema {
+/**
+ * @param {JsonSchema} schema
+ * @returns {JsonSchema}
+ */
+function resolveSchema(schema) {
   const ref = schema.$ref;
   if (typeof ref !== 'string') return schema;
   const name = ref.startsWith('#/$defs/') ? ref.slice('#/$defs/'.length) : '';
@@ -77,7 +94,11 @@ function resolveSchema(schema: JsonSchema): JsonSchema {
   return definitions[name];
 }
 
-function matchesType(value: unknown, type: unknown): boolean {
+/**
+ * @param {unknown} value
+ * @param {unknown} type
+ */
+function matchesType(value, type) {
   switch (type) {
     case 'object': return isRecord(value);
     case 'array': return Array.isArray(value);
@@ -88,7 +109,13 @@ function matchesType(value: unknown, type: unknown): boolean {
   }
 }
 
-function validateAgainstSchema(value: unknown, rawSchema: JsonSchema, path: string, errors: string[]): void {
+/**
+ * @param {unknown} value
+ * @param {JsonSchema} rawSchema
+ * @param {string} path
+ * @param {string[]} errors
+ */
+function validateAgainstSchema(value, rawSchema, path, errors) {
   const schema = resolveSchema(rawSchema);
   for (const keyword of Object.keys(schema)) {
     if (!supportedKeywords.has(keyword)) throw new Error(`Unsupported schema keyword ${keyword}.`);
@@ -112,11 +139,12 @@ function validateAgainstSchema(value: unknown, rawSchema: JsonSchema, path: stri
     errors.push(`${at} must be >= ${schema.minimum}`);
   }
   if (Array.isArray(value) && isRecord(schema.items)) {
-    value.forEach((item, index) => validateAgainstSchema(item, schema.items as JsonSchema, `${path}/${index}`, errors));
+    const items = schema.items;
+    value.forEach((item, index) => validateAgainstSchema(item, items, `${path}/${index}`, errors));
   }
   if (isRecord(value)) {
     const properties = isRecord(schema.properties) ? schema.properties : {};
-    for (const key of Array.isArray(schema.required) ? schema.required as string[] : []) {
+    for (const key of Array.isArray(schema.required) ? schema.required : []) {
       if (!(key in value)) errors.push(`${at} must have required property '${key}'`);
     }
     for (const [key, child] of Object.entries(value)) {
@@ -129,7 +157,11 @@ function validateAgainstSchema(value: unknown, rawSchema: JsonSchema, path: stri
   }
 }
 
-function escapeMarkdown(value: string): string {
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeMarkdown(value) {
   const markdownCharacters = new Set(['\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '~', '|']);
   const escaped = Array.from(value, (character) =>
     markdownCharacters.has(character) ? `\\${character}` : character
@@ -141,7 +173,11 @@ function escapeMarkdown(value: string): string {
     .replaceAll('@', '&#64;');
 }
 
-export function renderReviewComment(review: ReviewResult): string {
+/**
+ * @param {ReviewResult} review
+ * @returns {string}
+ */
+export function renderReviewComment(review) {
   const sections = review.findings.map((finding) => {
     const location = `${finding.location.path}:${finding.location.start_line}-${finding.location.end_line}`;
     const humanCheck = finding.human_verification_required ? 'Required' : 'Not indicated';
@@ -184,7 +220,11 @@ export function renderReviewComment(review: ReviewResult): string {
   return body;
 }
 
-function getApiBase(apiUrl?: string): URL {
+/**
+ * @param {string} [apiUrl]
+ * @returns {URL}
+ */
+function getApiBase(apiUrl) {
   const base = new URL(apiUrl ?? 'https://api.github.com');
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) {
     throw new Error('GitHub API URL must be HTTPS and must not contain credentials, query, or fragment.');
@@ -192,7 +232,11 @@ function getApiBase(apiUrl?: string): URL {
   return new URL(base.toString().endsWith('/') ? base.toString() : `${base.toString()}/`);
 }
 
-function repositoryParts(repository: string): { owner: string; repo: string } {
+/**
+ * @param {string} repository
+ * @returns {{ owner: string, repo: string }}
+ */
+function repositoryParts(repository) {
   const parts = repository.split('/');
   if (parts.length !== 2 || parts.some((part) => !/^[A-Za-z0-9_.-]+$/.test(part))) {
     throw new Error('GITHUB_REPOSITORY must use the owner/repository form.');
@@ -200,7 +244,11 @@ function repositoryParts(repository: string): { owner: string; repo: string } {
   return { owner: parts[0], repo: parts[1] };
 }
 
-function apiHeaders(token: string): HeadersInit {
+/**
+ * @param {string} token
+ * @returns {Record<string, string>}
+ */
+function apiHeaders(token) {
   return {
     Accept: 'application/vnd.github+json',
     Authorization: `Bearer ${token}`,
@@ -209,28 +257,39 @@ function apiHeaders(token: string): HeadersInit {
   };
 }
 
-async function requestJson<T>(url: URL, init: RequestInit, fetcher: Fetcher): Promise<T> {
+/**
+ * @template T
+ * @param {URL} url
+ * @param {RequestInit} init
+ * @param {Fetcher} fetcher
+ * @returns {Promise<T>}
+ */
+async function requestJson(url, init, fetcher) {
   const response = await fetcher(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000) });
   if (!response.ok) {
     throw new Error(`GitHub API request failed with HTTP ${response.status}. Response body omitted.`);
   }
-  return await response.json() as T;
+  return /** @type {T} */ (await response.json());
 }
 
-async function listPullRequestComments(
-  apiBase: URL,
-  token: string,
-  owner: string,
-  repo: string,
-  pullRequestNumber: number,
-  fetcher: Fetcher
-): Promise<GitHubComment[]> {
-  const comments: GitHubComment[] = [];
+/**
+ * @param {URL} apiBase
+ * @param {string} token
+ * @param {string} owner
+ * @param {string} repo
+ * @param {number} pullRequestNumber
+ * @param {Fetcher} fetcher
+ * @returns {Promise<GitHubComment[]>}
+ */
+async function listPullRequestComments(apiBase, token, owner, repo, pullRequestNumber, fetcher) {
+  /** @type {GitHubComment[]} */
+  const comments = [];
   for (let page = 1; page <= 100; page += 1) {
     const url = new URL(`repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${pullRequestNumber}/comments`, apiBase);
     url.searchParams.set('per_page', '100');
     url.searchParams.set('page', String(page));
-    const pageComments = await requestJson<GitHubComment[]>(url, {
+    /** @type {GitHubComment[]} */
+    const pageComments = await requestJson(url, {
       method: 'GET',
       headers: apiHeaders(token)
     }, fetcher);
@@ -240,7 +299,10 @@ async function listPullRequestComments(
   throw new Error('Too many PR comments to safely locate the existing review comment.');
 }
 
-export function validatePublisherConfig(config: PublisherConfig): void {
+/**
+ * @param {PublisherConfig} config
+ */
+export function validatePublisherConfig(config) {
   if (!config.token.trim()) throw new Error('A GitHub token is required for publishing.');
   repositoryParts(config.repository);
   if (!Number.isSafeInteger(config.pullRequestNumber) || config.pullRequestNumber < 1) {
@@ -250,28 +312,41 @@ export function validatePublisherConfig(config: PublisherConfig): void {
   getApiBase(config.apiUrl);
 }
 
-export function assertPostApproval(approved: string | undefined): void {
+/**
+ * @param {string | undefined} approved
+ */
+export function assertPostApproval(approved) {
   if (approved !== 'true') {
     throw new Error('Posting is disabled unless PR_COMMENT_APPROVED=true is explicitly set after human review.');
   }
 }
 
-export function parseReviewResult(input: unknown): ReviewResult {
-  const errors: string[] = [];
+/**
+ * @param {unknown} input
+ * @returns {ReviewResult}
+ */
+export function parseReviewResult(input) {
+  /** @type {string[]} */
+  const errors = [];
   validateAgainstSchema(input, reviewSchema, '', errors);
   if (errors.length > 0) {
     throw new Error(`Review JSON failed schema validation: ${errors.join('; ')}`);
   }
-  return input as ReviewResult;
+  return /** @type {ReviewResult} */ (input);
 }
 
-export function repositoryFromRemote(remoteUrl: string): string | undefined {
+/**
+ * @param {string} remoteUrl
+ * @returns {string | undefined}
+ */
+export function repositoryFromRemote(remoteUrl) {
   const withoutCredentials = remoteUrl.trim().replace(/^https?:\/\/[^@/]+@/, 'https://');
   const match = withoutCredentials.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/);
   return match?.[1];
 }
 
-function readOriginRemote(): string {
+/** @returns {string} */
+function readOriginRemote() {
   try {
     return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
@@ -281,12 +356,15 @@ function readOriginRemote(): string {
 
 // Fills gaps the platform did not configure: repository from a github.com origin, token from
 // GITHUB_TOKEN, and the comment author from the token's own identity. Explicit env always wins.
-export async function resolvePublisherConfig(
-  env: NodeJS.ProcessEnv,
-  fetcher: Fetcher = fetch,
-  readRemote: () => string = readOriginRemote
-): Promise<PublisherConfig> {
-  const config: PublisherConfig = {
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @param {Fetcher} [fetcher]
+ * @param {() => string} [readRemote]
+ * @returns {Promise<PublisherConfig>}
+ */
+export async function resolvePublisherConfig(env, fetcher = fetch, readRemote = readOriginRemote) {
+  /** @type {PublisherConfig} */
+  const config = {
     token: env.GH_TOKEN || env.GITHUB_TOKEN || '',
     repository: env.GITHUB_REPOSITORY || repositoryFromRemote(readRemote()) || '',
     pullRequestNumber: Number(env.PR_NUMBER),
@@ -298,7 +376,8 @@ export async function resolvePublisherConfig(
   }
   if (!config.expectedAuthor.trim() && config.token.trim()) {
     try {
-      const user = await requestJson<{ login?: string }>(new URL('user', getApiBase(config.apiUrl)), {
+      /** @type {{ login?: string }} */
+      const user = await requestJson(new URL('user', getApiBase(config.apiUrl)), {
         method: 'GET',
         headers: apiHeaders(config.token)
       }, fetcher);
@@ -311,11 +390,13 @@ export async function resolvePublisherConfig(
   return config;
 }
 
-export async function publishReviewComment(
-  review: ReviewResult,
-  config: PublisherConfig,
-  fetcher: Fetcher = fetch
-): Promise<{ action: 'created' | 'updated'; url?: string }> {
+/**
+ * @param {ReviewResult} review
+ * @param {PublisherConfig} config
+ * @param {Fetcher} [fetcher]
+ * @returns {Promise<{ action: 'created' | 'updated', url?: string }>}
+ */
+export async function publishReviewComment(review, config, fetcher = fetch) {
   validatePublisherConfig(config);
   const apiBase = getApiBase(config.apiUrl);
   const { owner, repo } = repositoryParts(config.repository);
@@ -330,7 +411,8 @@ export async function publishReviewComment(
   const body = renderReviewComment(review);
   const existing = ownedMarkerComments[0];
   if (existing) {
-    const updated = await requestJson<GitHubComment>(new URL(
+    /** @type {GitHubComment} */
+    const updated = await requestJson(new URL(
       `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments/${existing.id}`,
       apiBase
     ), {
@@ -341,7 +423,8 @@ export async function publishReviewComment(
     return { action: 'updated', url: updated.html_url };
   }
 
-  const created = await requestJson<GitHubComment>(new URL(
+  /** @type {GitHubComment} */
+  const created = await requestJson(new URL(
     `repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${config.pullRequestNumber}/comments`,
     apiBase
   ), {
@@ -352,7 +435,11 @@ export async function publishReviewComment(
   return { action: 'created', url: created.html_url };
 }
 
-async function readInput(inputPath: string): Promise<string> {
+/**
+ * @param {string} inputPath
+ * @returns {Promise<string>}
+ */
+async function readInput(inputPath) {
   if (inputPath === '-') {
     let input = '';
     for await (const chunk of process.stdin) {
@@ -370,14 +457,18 @@ async function readInput(inputPath: string): Promise<string> {
   return input;
 }
 
-async function main(args: string[]): Promise<void> {
+/**
+ * @param {string[]} args
+ */
+async function main(args) {
   const post = args.includes('--post');
   const positional = args.filter((arg) => arg !== '--post');
   if (positional.length !== 1) {
-    throw new Error('Usage: node publish-pr-comment.mts [--post] <review.json|->');
+    throw new Error('Usage: node publish-pr-comment.mjs [--post] <review.json|->');
   }
 
-  const input = JSON.parse(await readInput(positional[0])) as unknown;
+  /** @type {unknown} */
+  const input = JSON.parse(await readInput(positional[0]));
   const review = parseReviewResult(input);
   const body = renderReviewComment(review);
   if (!post) {
@@ -393,10 +484,19 @@ async function main(args: string[]): Promise<void> {
   console.log(`GitHub PR comment ${result.action} on ${config.repository}#${config.pullRequestNumber} with ${review.findings.length} warning(s)${destination}`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Compare real paths: plugin caches and /tmp are often symlinks, and a mismatch would skip main() and exit 0 silently.
+function isEntryPoint() {
+  try {
+    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint()) {
   try {
     await main(process.argv.slice(2));
-  } catch (error: unknown) {
+  } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown publisher error.';
     console.error(`ERROR: ${message}`);
     process.exitCode = 1;

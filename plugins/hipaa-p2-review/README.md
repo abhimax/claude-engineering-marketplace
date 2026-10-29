@@ -8,7 +8,7 @@ This Claude Code plugin packages a read-only healthcare PR review agent, the `re
 - `commands/post-hipaa-review.md`: `/hipaa-p2-review:post-hipaa-review <pr-number> [result.json]` posts a saved result (user-invoked only).
 - `agents/hipaa-p2-reviewer.md`: constrained read-only agent.
 - `skills/review-healthcare-pr/SKILL.md`: review workflow.
-- `scripts/publish-pr-comment.mts`: schema-validating PR comment publisher (Node.js 22.18+, no dependencies).
+- `scripts/publish-pr-comment.mjs`: schema-validating PR comment publisher (Node.js 18+, no dependencies).
 - `references/review-policy.md`: the six-area review scope and evidence boundaries.
 - `references/finding-format.md` and `references/review-result.schema.json`: JSON output contract.
 - `references/pr-comment-publishing.md`: the posting procedure both commands follow.
@@ -37,17 +37,51 @@ The organization must approve the AI execution environment, data-processing arra
 
 `/hipaa-review` follows the same split as the pr-reviewer plugin: the top-level session orchestrates, the review sub-agent analyses, and a real script posts. Concretely, it:
 
-1. Resolves the PR (argument or `gh pr view` for the current branch), confirms the checkout matches the PR head, and writes the merge-base diff to `/tmp/hipaa-p2-review/`.
-2. Spawns `hipaa-p2-review:hipaa-p2-reviewer` with the diff paths and any SCA reports, and saves its JSON to `/tmp/hipaa-p2-review/review-result.json`.
-3. Validates the JSON and renders the comment locally (dry run).
-4. Asks the user to approve posting that exact comment, unless the platform already set `PR_COMMENT_APPROVED=true`. Non-interactive runs without that flag do not post.
-5. Creates, or on reruns updates, one marked top-level PR comment.
+1. Finds the plugin root (on headless runners `CLAUDE_PLUGIN_ROOT` is often unset in Bash) and checks that `node` 18+ is available.
+2. Runs `scripts/pr-setup.sh`: resolves the PR, checks out its head (detached) if the runner cloned another branch, fetches the base, and writes the diff to `/tmp/hipaa-p2-review/`.
+3. Spawns `hipaa-p2-review:hipaa-p2-reviewer` with the diff paths, reference paths, and any SCA reports, and saves its JSON to `/tmp/hipaa-p2-review/review-result.json`.
+4. Validates the JSON and renders the comment locally (dry run).
+5. Posts only when approved: `PR_COMMENT_APPROVED=true` from the platform, `--approved` passed by the platform rule, or an explicit yes in an interactive session. Otherwise it stops at the dry run.
+6. Creates, or on reruns updates, one marked top-level PR comment.
+
+### Automated trigger (Xianix / AI-DLC agent)
+
+Add this execution block to the agent's `rules.json`. Applying the `ai-dlc/pr/hipaa-p2-review` label is the human opt-in that `--approved` records. Only people who are allowed to publish review content on the PR should be able to apply the label.
+
+```json
+{
+  "name": "github-pull-request-hipaa-p2-review",
+  "platform": "github",
+  "repository": { "url": "repository.clone_url" },
+  "match-any": [
+    { "name": "github-pr-tag-applied", "rule": "action==labeled&&label.name=='ai-dlc/pr/hipaa-p2-review'&&pull_request.state=='open'" },
+    { "name": "github-pr-opened-with-tag", "rule": "action==opened&&pull_request.labels.*.name=='ai-dlc/pr/hipaa-p2-review'&&pull_request.state=='open'" },
+    { "name": "github-pr-synchronize-with-tag", "rule": "action==synchronize&&pull_request.labels.*.name=='ai-dlc/pr/hipaa-p2-review'&&pull_request.state=='open'" },
+    { "name": "github-pr-reopened-with-tag", "rule": "action==reopened&&pull_request.labels.*.name=='ai-dlc/pr/hipaa-p2-review'&&pull_request.state=='open'" }
+  ],
+  "use-inputs": [
+    { "name": "pr-number", "value": "pull_request.number", "mandatory": true }
+  ],
+  "use-plugins": [
+    { "plugin-name": "hipaa-p2-review@claude-engineering-marketplace", "marketplace": "abhimax/claude-engineering-marketplace" }
+  ],
+  "with-envs": [
+    { "name": "GITHUB-TOKEN", "value": "secrets.GITHUB-TOKEN", "mandatory": true }
+  ],
+  "conversation-key": "pull_request.number",
+  "model": "claude-sonnet-4-5",
+  "max-budget-usd": 3,
+  "execute-prompt": "You are reviewing pull request #{{pr-number}} in the repository {{repository-name}}. Run /hipaa-p2-review:hipaa-review {{pr-number}} --approved to perform the healthcare privacy and access review and post its report as a PR comment."
+}
+```
+
+The `execute-prompt` must invoke the command. A prompt that only asks for the `hipaa-p2-reviewer` agent or the `review-healthcare-pr` skill produces JSON and never posts. The `GITHUB-TOKEN` secret is re-exported as `GITHUB_TOKEN`, which both `gh` and the publisher read, and it needs `Issues: read/write` (plus read access to pull requests and contents). The comment is authored by the token's account. The `reopened` rule is optional; without it, closing and reopening a PR does not trigger a review. To re-run a review, remove and re-apply the label or push a commit.
 
 The publisher can also run on its own:
 
 ```sh
-node plugins/hipaa-p2-review/scripts/publish-pr-comment.mts review-result.json        # dry run
-PR_COMMENT_APPROVED=true PR_NUMBER=42 node plugins/hipaa-p2-review/scripts/publish-pr-comment.mts --post review-result.json
+node plugins/hipaa-p2-review/scripts/publish-pr-comment.mjs review-result.json        # dry run
+PR_COMMENT_APPROVED=true PR_NUMBER=42 node plugins/hipaa-p2-review/scripts/publish-pr-comment.mjs --post review-result.json
 ```
 
 From the marketplace repository, `npm run publish:pr-comment -- ...` runs the same file. Without `--post`, it validates and renders locally and makes no network request. Posting also requires `PR_COMMENT_APPROVED=true`, set only after a human approves.

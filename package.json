@@ -8,7 +8,7 @@
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "validate": "./scripts/validate-marketplace",
-    "publish:pr-comment": "node plugins/hipaa-p2-review/scripts/publish-pr-comment.mts"
+    "publish:pr-comment": "node plugins/hipaa-p2-review/scripts/publish-pr-comment.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -131,7 +131,8 @@ function validatePluginFiles(pluginRoot: string, errors: string[]): void {
     'references/finding-format.md',
     'references/review-result.schema.json',
     'references/pr-comment-publishing.md',
-    'scripts/publish-pr-comment.mts',
+    'scripts/publish-pr-comment.mjs',
+    'scripts/pr-setup.sh',
     'README.md'
   ]) {
     requireFile(pluginRoot, relativePath, errors);

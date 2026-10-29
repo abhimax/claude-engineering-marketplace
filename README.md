@@ -18,7 +18,7 @@ plugins/hipaa-p2-review/
   commands/post-hipaa-review.md
   agents/hipaa-p2-reviewer.md
   skills/review-healthcare-pr/SKILL.md
-  scripts/publish-pr-comment.mts
+  scripts/publish-pr-comment.mjs
   references/review-policy.md
   references/finding-format.md
   references/review-result.schema.json
@@ -32,7 +32,7 @@ Add future plugins under `plugins/<plugin-name>/` with their own `.claude-plugin
 
 ## Prerequisites
 
-- Node.js 22.18+ and npm for structural and output-schema tests. The bundled publisher runs with plain `node` on 22.18+ (native TypeScript type stripping).
+- Node.js 22+ and npm for structural and output-schema tests. The bundled publisher is dependency-free JavaScript and runs on Node.js 18+.
 - Run `npm ci` once to install the locked TypeScript, `tsx`, Node.js type definitions, and Ajv development dependencies.
 - Current Claude Code CLI for authoritative plugin/marketplace validation and local installation. The CLI's validator does not require an authenticated review session.
 - Git and read access to the private repository for Git-based marketplace distribution.
@@ -59,7 +59,7 @@ For a one-session local load without installing:
 claude --plugin-dir ./plugins/hipaa-p2-review
 ```
 
-The agent is namespaced `hipaa-p2-review:hipaa-p2-reviewer`; the skill is `/hipaa-p2-review:review-healthcare-pr`. Run `/hipaa-p2-review:hipaa-review [pr-number]` to review a PR and, after you approve the rendered report, post it as a PR comment; `/hipaa-p2-review:post-hipaa-review <pr-number>` posts a saved result. The identifier remains unchanged for install compatibility. Use only approved synthetic inputs. Behavior evaluations need human-reviewed synthetic test cases before any deployment gate is considered.
+The agent is namespaced `hipaa-p2-review:hipaa-p2-reviewer`; the skill is `/hipaa-p2-review:review-healthcare-pr`. Run `/hipaa-p2-review:hipaa-review [pr-number]` to review a PR and, after you approve the rendered report, post it as a PR comment (automated platforms pass `--approved`; see the plugin README for the `rules.json` block); `/hipaa-p2-review:post-hipaa-review <pr-number>` posts a saved result. The identifier remains unchanged for install compatibility. Use only approved synthetic inputs. Behavior evaluations need human-reviewed synthetic test cases before any deployment gate is considered.
 
 ## Add and Install the Local Marketplace
 
@@ -113,7 +113,7 @@ Adapter contract: the review agent, the `/hipaa-review` orchestration command, a
 - **Input**: pull-request identifier and base/head revisions; changed paths; unified diff; and bounded, relevant surrounding code/configuration needed to validate data flow. The adapter labels all repository content as untrusted, excludes secrets/PHI where possible, and records missing or truncated context.
 - **Execution**: use only an organization-approved runtime and model/data-processing arrangement. Invoke this plugin or an explicitly approved equivalent; do not grant production-system access. Keep the existing PR Review Agent independent and preserve its current behavior.
 - **Output**: one JSON result following `plugins/hipaa-p2-review/references/review-result.schema.json` (`schema_version` `2.0.0`). Validate JSON and schema before storing or displaying; reject malformed output, preserve `incomplete` status, and redact sensitive material. Findings contain warning, evidence status, category, location, evidence, risk, and recommendation. The contract has no severity field; update connected platform validators before deploying plugin version `0.3.0` or later.
-- **Publication**: the platform can pass schema-validated JSON to `node plugins/hipaa-p2-review/scripts/publish-pr-comment.mts --post -` (or `npm run publish:pr-comment -- --post -` in this repository) on stdin with repository and PR metadata. `GH_TOKEN`, `GITHUB_REPOSITORY`, `PR_NUMBER`, and `GH_COMMENT_AUTHOR_LOGIN` come from the platform's secret/config store; never put the PAT in prompts, source files, command-line arguments, logs, or review JSON. Posting requires `PR_COMMENT_APPROVED=true` plus `--post`; set the flag only after the approved human-review step. Otherwise the publisher is dry-run only. It creates or updates one marked issue-level PR comment authored by the configured bot, validates schema before network calls, escapes reviewer text, and never approves, requests changes, or merges. Fine-grained PAT permission: repository `Issues: read/write`; no contents or pull-request review write permission is needed. Use a dedicated bot identity/token.
+- **Publication**: the platform can pass schema-validated JSON to `node plugins/hipaa-p2-review/scripts/publish-pr-comment.mjs --post -` (or `npm run publish:pr-comment -- --post -` in this repository) on stdin with repository and PR metadata. `GH_TOKEN`, `GITHUB_REPOSITORY`, `PR_NUMBER`, and `GH_COMMENT_AUTHOR_LOGIN` come from the platform's secret/config store; never put the PAT in prompts, source files, command-line arguments, logs, or review JSON. Posting requires `PR_COMMENT_APPROVED=true` plus `--post`; set the flag only after the approved human-review step. Otherwise the publisher is dry-run only. It creates or updates one marked issue-level PR comment authored by the configured bot, validates schema before network calls, escapes reviewer text, and never approves, requests changes, or merges. Fine-grained PAT permission: repository `Issues: read/write`; no contents or pull-request review write permission is needed. Use a dedicated bot identity/token.
 
 GitHub notes that create-comment requests trigger notifications and can be secondary-rate-limited. The publisher updates its own marked comment on reruns, avoids touching comments by other authors, and fails closed on ambiguous matches. Platform owners still need to define retries, audit events, retention, and how publication failures are surfaced. Review text may itself reveal sensitive context, so sanitize/redact the validated result and require the approved human gate before posting.
 
