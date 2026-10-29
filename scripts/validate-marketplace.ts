@@ -161,9 +161,11 @@ function validateRepositoryFiles(root: string, errors: string[]): void {
     'CONTRIBUTING.md',
     'tests/README.md',
     'tests/validate-marketplace.test.ts',
+    'tests/publish-pr-comment.test.ts',
     'tests/fixtures/patient-appointment-synthetic.json',
     'package.json',
     'scripts/validate-marketplace',
+    'scripts/publish-pr-comment.ts',
     '.github/workflows/validate-marketplace.yml'
   ]) {
     requireFile(root, relativePath, errors);

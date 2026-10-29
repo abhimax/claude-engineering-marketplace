@@ -9,7 +9,7 @@
       "name": "hipaa-p2-review",
       "source": "./plugins/hipaa-p2-review",
       "displayName": "Healthcare Privacy and Access Review",
-      "description": "Report-only PR warnings for exposed credentials, PHI/PII leakage, test data, encryption, endpoint access, and dependency/vendor risks."
+      "description": "Six-area healthcare PR risk review with optional human-approved GitHub comment publishing."
     }
   ]
 }

@@ -4,7 +4,7 @@ A private, version-controlled catalog for reusable Claude Code plugins. The init
 
 ## Architecture
 
-This repository uses Claude Code's native marketplace and plugin layout. The marketplace catalog points to each plugin directory in this repository. Plugin manifests package agents, skills, and references. No application server, database, GitHub PAT integration, MCP server, or production connection is included.
+This repository uses Claude Code's native marketplace and plugin layout. The marketplace catalog points to each plugin directory in this repository. Plugin manifests package agents, skills, and references. No application server, database, PAT, MCP server, or production connection is included. A separate comment publisher accepts a PAT from the approved platform secret store at runtime; it never stores credentials in the repository.
 
 Marketplace packaging/distribution and agent execution/CI integration are separate concerns. See [Integration Contract](#integration-contract).
 
@@ -47,7 +47,7 @@ npm test
 ./scripts/validate-marketplace
 ```
 
-The shared script runs the TypeScript structural validator followed by the official strict marketplace and plugin validation commands. The tests cover catalog duplicates, source paths, manifest-name agreement, component frontmatter, and the finding JSON Schema. They do not prove model behavior.
+The shared script runs the TypeScript structural validator followed by the official strict marketplace and plugin validation commands. The tests cover catalog duplicates, source paths, manifest-name agreement, component frontmatter, the finding JSON Schema, and PR-comment rendering/publishing behavior with a mocked GitHub API. They do not prove model behavior or post a real comment.
 
 For a one-session local load without installing:
 
@@ -104,19 +104,21 @@ Packaging and distribution answer where approved plugin instructions live and ho
 
 Before integration, confirm whether that platform can invoke Claude Code or another approved model runtime, how source code is processed and retained, and what its least-privilege GitHub publication mechanism is. If it cannot load a plugin, an adapter must separately package or translate the reviewed instructions; installing this marketplace alone does not integrate the platform.
 
-Proposed adapter contract, not implemented here:
+Adapter contract: the review agent and standalone comment publisher are implemented here; platform orchestration and secret injection remain the platform owner's responsibility.
 
 - **Input**: pull-request identifier and base/head revisions; changed paths; unified diff; and bounded, relevant surrounding code/configuration needed to validate data flow. The adapter labels all repository content as untrusted, excludes secrets/PHI where possible, and records missing or truncated context.
 - **Execution**: use only an organization-approved runtime and model/data-processing arrangement. Invoke this plugin or an explicitly approved equivalent; do not grant production-system access. Keep the existing PR Review Agent independent and preserve its current behavior.
-- **Output**: one JSON result following `plugins/hipaa-p2-review/references/review-result.schema.json` (`schema_version` `2.0.0`). Validate JSON and schema before storing or displaying; reject malformed output, preserve `incomplete` status, and redact sensitive material. Findings contain warning, evidence status, category, location, evidence, risk, and recommendation. The contract has no severity field; update connected platform validators before deploying plugin version `0.2.0`.
-- **Publication**: initial mode is report-only for a human reviewer. No merge blocking, automatic approval, or GitHub PR comment publishing is implemented. Any later GitHub publisher needs separately approved app permissions, identity, comment/update behavior, retry/idempotency rules, failure policy, audit events, and human escalation.
+- **Output**: one JSON result following `plugins/hipaa-p2-review/references/review-result.schema.json` (`schema_version` `2.0.0`). Validate JSON and schema before storing or displaying; reject malformed output, preserve `incomplete` status, and redact sensitive material. Findings contain warning, evidence status, category, location, evidence, risk, and recommendation. The contract has no severity field; update connected platform validators before deploying plugin version `0.3.0`.
+- **Publication**: the platform can pass schema-validated JSON to `npm run publish:pr-comment -- --post -` on stdin with repository and PR metadata. `GH_TOKEN`, `GITHUB_REPOSITORY`, `PR_NUMBER`, and `GH_COMMENT_AUTHOR_LOGIN` come from the platform's secret/config store; never put the PAT in prompts, source files, command-line arguments, logs, or review JSON. Posting requires `PR_COMMENT_APPROVED=true` plus `--post`; set the flag only after the approved human-review step. Otherwise the publisher is dry-run only. It creates or updates one marked issue-level PR comment authored by the configured bot, validates schema before network calls, escapes reviewer text, and never approves, requests changes, or merges. Fine-grained PAT permission: repository `Issues: read/write`; no contents or pull-request review write permission is needed. Use a dedicated bot identity/token.
+
+GitHub notes that create-comment requests trigger notifications and can be secondary-rate-limited. The publisher updates its own marked comment on reruns, avoids touching comments by other authors, and fails closed on ambiguous matches. Platform owners still need to define retries, audit events, retention, and how publication failures are surfaced. Review text may itself reveal sensitive context, so sanitize/redact the validated result and require the approved human gate before posting.
 
 The adapter must define bounded retries and timeouts, fail safely to a visible incomplete/error result, protect logs from PHI and secrets, and record traceable audit events without retaining unnecessary source content. The platform owner must approve these details before processing real pull-request code.
 
 ## Known Limitations
 
 - This reviewer does not assign severity levels. Its warnings are limited to the six areas listed above.
-- The plugin prompts a code-review agent but does not itself fetch PR diffs, call GitHub, validate generated JSON at runtime, or publish findings.
+- The plugin agent does not fetch PR diffs or access GitHub. The publisher accepts validated review JSON and PR metadata; it never runs the review itself. The existing cloud platform still needs to invoke the publisher with its approved secret injection and human-review gate.
 - Official CLI validation checks package structure/frontmatter, not the quality or completeness of the model's review.
 - Local marketplace installation, GitHub-hosted private access, and Claude organization synchronization are distinct distribution mechanisms.
 - No assertion is made that the existing agent platform can execute this plugin.

@@ -7,7 +7,8 @@
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "validate": "./scripts/validate-marketplace"
+    "validate": "./scripts/validate-marketplace",
+    "publish:pr-comment": "tsx scripts/publish-pr-comment.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

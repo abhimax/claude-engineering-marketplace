@@ -42,8 +42,10 @@ function createFixture(): { root: string; pluginRoot: string } {
     'CONTRIBUTING.md',
     'tests/README.md',
     'tests/validate-marketplace.test.ts',
+    'tests/publish-pr-comment.test.ts',
     'package.json',
     'scripts/validate-marketplace',
+    'scripts/publish-pr-comment.ts',
     '.github/workflows/validate-marketplace.yml'
   ]) write(file, '{}');
   write('tests/fixtures/patient-appointment-synthetic.json', JSON.stringify({

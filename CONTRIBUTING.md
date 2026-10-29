@@ -13,6 +13,7 @@
 
 - Use synthetic patient and appointment data only. Do not add real PHI, credentials, access tokens, private keys, production payloads, or production-system connections.
 - Add or update structural tests and synthetic fixtures for new manifest/component behavior. Do not present file-existence assertions as proof of model quality.
+- Keep GitHub publishing separate from reviewer instructions. Publisher changes require mocked API tests, schema validation before requests, dry-run default, explicit posting approval, and a bot identity that only updates its own marked comment.
 - Model-behavior evaluations must use approved synthetic cases, have human-reviewed expectations, and remain separate from merge-blocking checks until formally approved.
 - Do not add a GitHub integration, external processing service, or healthcare-system MCP server without an approved security and privacy design.
 
