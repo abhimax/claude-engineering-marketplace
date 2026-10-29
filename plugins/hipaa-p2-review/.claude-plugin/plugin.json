@@ -1,7 +1,7 @@
 {
   "name": "hipaa-p2-review",
   "displayName": "Healthcare Privacy and Access Review",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Six-area healthcare PR risk review that posts its report as a human-approved GitHub PR comment.",
   "author": {
     "name": "Engineering Organization"

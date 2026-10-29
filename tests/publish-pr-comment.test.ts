@@ -54,11 +54,11 @@ test('renders warning fields and escapes reviewer-controlled markdown/HTML', () 
     summary: '<script>alert(1)</script> | summary'
   });
   const body = renderReviewComment(review);
-  assert.ok(body.includes('&lt;script&gt;alert\\(1\\)&lt;/script&gt; \\| summary'));
+  assert.ok(body.includes('&lt;script&gt;alert(1)&lt;/script&gt; \\| summary'));
   assert.doesNotMatch(body, /<script>|@everyone/);
-  assert.match(body, /\*\*Risk:\*\*/);
-  assert.match(body, /\*\*Recommendation:\*\*/);
-  assert.match(body, /<!-- healthcare-data-review -->/);
+  assert.match(body, /\*\*⚠️ Risk\*\*/);
+  assert.match(body, /\*\*✅ Recommendation\*\*/);
+  assert.ok(body.startsWith('<!-- healthcare-data-review -->'));
   assert.doesNotMatch(body, /\*\*Severity:\*\*|\bP[012]\b/);
 });
 
@@ -267,4 +267,41 @@ test('approves posting from the environment or the PR opt-in label, and refuses 
   assert.equal(await resolvePostApproval({ HIPAA_REVIEW_APPROVAL_LABEL: 'custom/opt-in' }, baseConfig, labelsFetch(['custom/opt-in'])), 'label');
   await assert.rejects(resolvePostApproval({}, baseConfig, labelsFetch(['ai-dlc/pr/pr-review'])), /PR_COMMENT_APPROVED=true.*'ai-dlc\/pr\/hipaa-p2-review' label/);
   await assert.rejects(resolvePostApproval({ PR_COMMENT_APPROVED: 'false' }, baseConfig, labelsFetch([])), /label/);
+});
+
+test('renders status, coverage for all six areas, and keeps blocks separated', () => {
+  const body = renderReviewComment(sampleReview);
+  assert.match(body, /\| \*\*Review status\*\* \| ✅ Complete \|/);
+  assert.match(body, /⚠️ 1 — 🔴 0 confirmed · 🟡 1 potential/);
+  assert.match(body, /\| 🩺 PHI\/PII leakage \| ⚠️ 1 warning \|/);
+  assert.match(body, /\| 🔑 Hardcoded secrets & credentials \| ✅ No warnings \|/);
+  assert.equal((body.match(/^\| (🔑|🩺|🧪|🔒|🛡️|📦) /gmu) ?? []).length, 6);
+  assert.match(body, /> \[!IMPORTANT\][^\n]*\n[^\n]*\n\n\| \| \|/, 'disclaimer callout must end before the status table');
+  assert.match(body, /<summary><b>📝 Review limitations \(1\)<\/b><\/summary>/);
+});
+
+test('links locations to the PR head only with a valid repository and commit SHA', () => {
+  const sha = 'a'.repeat(40);
+  const linked = renderReviewComment(sampleReview, { repository: 'example/healthcare-api', headSha: sha });
+  assert.ok(linked.includes(`📍 [\`src/patient/log.ts#L20-L21\`](https://github.com/example/healthcare-api/blob/${sha}/src/patient/log.ts#L20-L21)`));
+
+  const unlinked = renderReviewComment(sampleReview, { repository: 'example/healthcare-api', headSha: 'main' });
+  assert.ok(unlinked.includes('📍 `src/patient/log.ts#L20-L21`'));
+  assert.doesNotMatch(unlinked, /\]\(https:/);
+});
+
+test('shows reviewer URLs and paths as inline code without backslashes or live links', () => {
+  const review = parseReviewResult({
+    ...sampleReview,
+    findings: [{
+      ...sampleReview.findings[0],
+      evidence: 'Default ANALYTICS_URL is http://ingest.example-analytics.io/v1 (see #12) and @someone\nsaid so.',
+      location: { path: 'patient-service/src/config/env.ts', start_line: 67, end_line: 67 }
+    }]
+  });
+  const body = renderReviewComment(review);
+  assert.ok(body.includes('`http://ingest.example-analytics.io/v1`'));
+  assert.ok(body.includes('`patient-service/src/config/env.ts#L67`'));
+  assert.ok(body.includes('(see &#35;12) and &#64;someone said so.'));
+  assert.doesNotMatch(body, /patient\\-service|ingest\\\./);
 });

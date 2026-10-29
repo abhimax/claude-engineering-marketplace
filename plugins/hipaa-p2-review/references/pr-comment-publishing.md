@@ -14,7 +14,7 @@ Shared posting procedure for the `/hipaa-review` and `/post-hipaa-review` comman
 ## 1. Render the dry run
 
 ```bash
-source /tmp/hipaa-p2-review/plugin.env && node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" /tmp/hipaa-p2-review/review-result.json
+source /tmp/hipaa-p2-review/plugin.env && { [ -f /tmp/hipaa-p2-review/state.env ] && source /tmp/hipaa-p2-review/state.env; } ; node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" /tmp/hipaa-p2-review/review-result.json
 ```
 
 A non-zero exit means the result failed schema validation or exceeds a limit; stop and show the `ERROR:` line. Otherwise show the rendered Markdown exactly as printed.
@@ -41,6 +41,7 @@ The script reads, in order:
 | PR number | `PR_NUMBER` (required) |
 | Comment author | `GH_COMMENT_AUTHOR_LOGIN`, else the token's own login from `GET /user` |
 | API base | `GITHUB_API_URL` (optional, HTTPS only) |
+| Line links | `HEAD_SHA` from `state.env` (optional; locations link to the PR head commit) |
 
 If neither token variable is set but the `gh` CLI is authenticated, supply its token inline without printing it: `GH_TOKEN="$(gh auth token)"`. A GitHub Actions `GITHUB_TOKEN` cannot read `GET /user`; in that case also set `GH_COMMENT_AUTHOR_LOGIN` (for example `github-actions[bot]`).
 
@@ -49,7 +50,7 @@ If neither token variable is set but the `gh` CLI is authenticated, supply its t
 Run as one Bash call:
 
 ```bash
-source /tmp/hipaa-p2-review/plugin.env && PR_NUMBER=<n> node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" --post /tmp/hipaa-p2-review/review-result.json
+source /tmp/hipaa-p2-review/plugin.env && { [ -f /tmp/hipaa-p2-review/state.env ] && source /tmp/hipaa-p2-review/state.env; } ; PR_NUMBER=<n> node "$HIPAA_PLUGIN_ROOT/scripts/publish-pr-comment.mjs" --post /tmp/hipaa-p2-review/review-result.json
 ```
 
 Prefix `PR_COMMENT_APPROVED=true` only for approval options 2 and 4, and `GH_TOKEN="$(gh auth token)"` only when step 3 calls for it. On success the script prints one line such as `GitHub PR comment created on owner/repo#42 with 2 warning(s): <url>`; relay it. On failure, show the `ERROR:` line and stop. Do not retry with a different mechanism.

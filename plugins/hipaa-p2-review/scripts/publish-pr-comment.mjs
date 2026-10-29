@@ -158,63 +158,169 @@ function validateAgainstSchema(value, rawSchema, path, errors) {
   }
 }
 
+/** @type {Record<string, { icon: string, label: string }>} */
+const categoryDisplay = {
+  hardcoded_secret_credential: { icon: '🔑', label: 'Hardcoded secrets & credentials' },
+  phi_pii_leakage: { icon: '🩺', label: 'PHI/PII leakage' },
+  unmasked_test_data: { icon: '🧪', label: 'Unmasked test data' },
+  encryption_enforcement: { icon: '🔒', label: 'Encryption enforcement' },
+  endpoint_access_control: { icon: '🛡️', label: 'Endpoint access control' },
+  dependency_sca_baa: { icon: '📦', label: 'Dependencies, SCA & BAA' }
+};
+
+// Colours mark evidence status only; the review contract assigns no severity.
+const evidenceDisplay = {
+  confirmed: '🔴 **Confirmed**',
+  potential: '🟡 **Potential** — needs verification'
+};
+
+const confidenceDisplay = {
+  high: '●●● High',
+  medium: '●●○ Medium',
+  low: '●○○ Low'
+};
+
 /**
+ * @typedef {object} RenderContext
+ * @property {string} [repository] owner/repo, used to link locations
+ * @property {string} [headSha] PR head commit, used to link locations
+ */
+
+/**
+ * Inline code is never parsed as Markdown or HTML, so it is the safest container for raw values.
  * @param {string} value
  * @returns {string}
  */
-function escapeMarkdown(value) {
-  const markdownCharacters = new Set(['\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '~', '|']);
-  const escaped = Array.from(value, (character) =>
-    markdownCharacters.has(character) ? `\\${character}` : character
+function codeSpan(value) {
+  return `\`${value.replace(/\s+/g, ' ').replaceAll('`', "'")}\``;
+}
+
+/**
+ * Escapes reviewer-controlled text for inline Markdown: no formatting, links, HTML, mentions, or
+ * issue references. URLs become inline code so they are shown but never turned into live links.
+ * @param {string} value
+ * @returns {string}
+ */
+function escapeInline(value) {
+  const inlineSyntax = new Set(['\\', '`', '*', '_', '[', ']', '~', '|']);
+  const htmlEntities = /** @type {Record<string, string>} */ ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '@': '&#64;', '#': '&#35;' });
+  const escapeText = (/** @type {string} */ text) => Array.from(text, (character) =>
+    htmlEntities[character] ?? (inlineSyntax.has(character) ? `\\${character}` : character)
   ).join('');
-  return escaped
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('@', '&#64;');
+  const urlPattern = /\b(?:https?:\/\/|www\.)[^\s<>`]+/gi;
+  const flattened = value.replace(/\s+/g, ' ').trim();
+  let output = '';
+  let last = 0;
+  for (const match of flattened.matchAll(urlPattern)) {
+    const index = match.index ?? 0;
+    output += escapeText(flattened.slice(last, index)) + codeSpan(match[0]);
+    last = index + match[0].length;
+  }
+  return output + escapeText(flattened.slice(last));
+}
+
+/**
+ * @param {ReviewLocation} location
+ * @param {RenderContext} context
+ * @returns {string}
+ */
+function renderLocation(location, context) {
+  const lines = location.start_line === location.end_line
+    ? `L${location.start_line}`
+    : `L${location.start_line}-L${location.end_line}`;
+  const label = codeSpan(`${location.path}#${lines}`);
+  const repository = context.repository && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(context.repository) ? context.repository : '';
+  const headSha = context.headSha && /^[0-9a-f]{40}$/.test(context.headSha) ? context.headSha : '';
+  if (!repository || !headSha || location.path.split('/').some((segment) => segment === '..' || segment === '')) return label;
+  const path = location.path.split('/').map(encodeURIComponent).join('/');
+  return `[${label}](https://github.com/${repository}/blob/${headSha}/${path}#${lines})`;
+}
+
+/**
+ * @param {string} kind
+ * @param {string} title
+ * @param {string} text
+ * @returns {string[]}
+ */
+function alertBlock(kind, title, text) {
+  return [`> [!${kind}]`, `> **${title}**`, `> ${escapeInline(text)}`];
 }
 
 /**
  * @param {ReviewResult} review
+ * @param {RenderContext} [context]
  * @returns {string}
  */
-export function renderReviewComment(review) {
-  const sections = review.findings.map((finding) => {
-    const location = `${finding.location.path}:${finding.location.start_line}-${finding.location.end_line}`;
-    const humanCheck = finding.human_verification_required ? 'Required' : 'Not indicated';
-    return [
-      `### ${escapeMarkdown(finding.title)}`,
-      `**Warning:** ${escapeMarkdown(finding.category)} · ${escapeMarkdown(finding.evidence_status)} · confidence ${finding.confidence}`,
-      `**Location:** \`${escapeMarkdown(location)}\``,
-      `**Evidence:** ${escapeMarkdown(finding.evidence)}`,
-      `**Risk:** ${escapeMarkdown(finding.risk)}`,
-      `**Recommendation:** ${escapeMarkdown(finding.recommendation)}`,
-      `**Human verification:** ${humanCheck}`
-    ].join('\n\n');
+export function renderReviewComment(review, context = {}) {
+  const confirmed = review.findings.filter((finding) => finding.evidence_status === 'confirmed').length;
+  const potential = review.findings.length - confirmed;
+  const needsHuman = review.findings.filter((finding) => finding.human_verification_required).length;
+  const status = review.review_status === 'complete'
+    ? '✅ Complete'
+    : '⚠️ Incomplete — part of the scope could not be reviewed';
+
+  const lines = [
+    commentMarker,
+    '## 🩺 Healthcare Privacy & Access Review',
+    '',
+    '> [!IMPORTANT]',
+    '> **Automated review — human verification required.** Warnings are risk signals, not a HIPAA compliance determination, and no severity score is assigned.',
+    '',
+    '| | |',
+    '|:--|:--|',
+    `| **Review status** | ${status} |`,
+    `| **Warnings** | ${review.findings.length === 0 ? '✅ None found' : `⚠️ ${review.findings.length} — 🔴 ${confirmed} confirmed · 🟡 ${potential} potential`} |`,
+    `| **Needs human check** | 👤 ${needsHuman} of ${review.findings.length} |`,
+    '',
+    `**Summary:** ${escapeInline(review.summary)}`,
+    '',
+    '### 📊 Coverage by review area',
+    '',
+    '| Area | Result |',
+    '|:--|:--|'
+  ];
+  for (const [category, display] of Object.entries(categoryDisplay)) {
+    const count = review.findings.filter((finding) => finding.category === category).length;
+    lines.push(`| ${display.icon} ${display.label} | ${count === 0 ? '✅ No warnings' : `⚠️ ${count} warning${count === 1 ? '' : 's'}`} |`);
+  }
+
+  lines.push('', '### 🔎 Findings', '');
+  if (review.findings.length === 0) {
+    lines.push('> [!TIP]', '> ✅ No evidence-backed warning was identified in the assessable supplied scope. This is not a compliance determination.', '');
+  }
+  review.findings.forEach((finding, index) => {
+    const display = categoryDisplay[finding.category] ?? { icon: '⚠️', label: finding.category };
+    if (index > 0) lines.push('---', '');
+    lines.push(
+      `#### ${display.icon} ${codeSpan(finding.id)} ${escapeInline(finding.title)}`,
+      '',
+      `${evidenceDisplay[finding.evidence_status]} · Confidence ${confidenceDisplay[finding.confidence]} · ${display.label}${finding.human_verification_required ? ' · 👤 Human check required' : ''}`,
+      '',
+      `📍 ${renderLocation(finding.location, context)}`,
+      '',
+      ...alertBlock('NOTE', '🔍 Evidence', finding.evidence),
+      '',
+      ...alertBlock('CAUTION', '⚠️ Risk', finding.risk),
+      '',
+      ...alertBlock('TIP', '✅ Recommendation', finding.recommendation),
+      ''
+    );
   });
 
-  const findingsBody = sections.length > 0
-    ? sections.join('\n\n---\n\n')
-    : 'No evidence-backed warning was identified in the assessable supplied scope. This is not a compliance determination.';
-  const uncertainties = review.uncertainties.length > 0
-    ? '\n\n### Review limitations\n' + review.uncertainties.map((item) => '- ' + escapeMarkdown(item)).join('\n')
-    : '';
+  if (review.uncertainties.length > 0) {
+    lines.push(
+      '<details>',
+      `<summary><b>📝 Review limitations (${review.uncertainties.length})</b></summary>`,
+      '',
+      ...review.uncertainties.map((item) => `- ℹ️ ${escapeInline(item)}`),
+      '',
+      '</details>',
+      ''
+    );
+  }
+  lines.push('<sub>🤖 Generated by the Healthcare Privacy and Access Review plugin · Report-only · Rerunning the review updates this comment.</sub>');
 
-  const body = [
-    commentMarker,
-    '## Healthcare Privacy and Access Review',
-    '',
-    '> Automated review warning only. Human verification is required. This comment may contain sensitive review context; confirm it is appropriate for this repository before publishing. It does not determine HIPAA compliance.',
-    '',
-    `**Review status:** ${review.review_status}`,
-    '',
-    escapeMarkdown(review.summary),
-    '',
-    findingsBody,
-    uncertainties,
-    '',
-    '_Generated by the Healthcare Privacy and Access Review plugin. No severity score is assigned._'
-  ].filter((line) => line.length > 0).join('\n');
+  const body = lines.join('\n');
   if (body.length > maxCommentCharacters) {
     throw new Error(`Rendered PR comment exceeds the ${maxCommentCharacters}-character limit.`);
   }
@@ -426,9 +532,10 @@ export async function resolvePublisherConfig(env, fetcher = fetch, readRemote = 
  * @param {ReviewResult} review
  * @param {PublisherConfig} config
  * @param {Fetcher} [fetcher]
+ * @param {RenderContext} [context]
  * @returns {Promise<{ action: 'created' | 'updated', url?: string }>}
  */
-export async function publishReviewComment(review, config, fetcher = fetch) {
+export async function publishReviewComment(review, config, fetcher = fetch, context = {}) {
   validatePublisherConfig(config);
   const apiBase = getApiBase(config.apiUrl);
   const { owner, repo } = repositoryParts(config.repository);
@@ -440,7 +547,7 @@ export async function publishReviewComment(review, config, fetcher = fetch) {
     throw new Error('Multiple bot-owned review comments found; refusing ambiguous update.');
   }
 
-  const body = renderReviewComment(review);
+  const body = renderReviewComment(review, context);
   const existing = ownedMarkerComments[0];
   if (existing) {
     /** @type {GitHubComment} */
@@ -502,7 +609,12 @@ async function main(args) {
   /** @type {unknown} */
   const input = JSON.parse(await readInput(positional[0]));
   const review = parseReviewResult(input);
-  const body = renderReviewComment(review);
+  /** @type {RenderContext} */
+  const context = {
+    repository: process.env.GITHUB_REPOSITORY || repositoryFromRemote(readOriginRemote()),
+    headSha: process.env.HEAD_SHA
+  };
+  const body = renderReviewComment(review, context);
   if (!post) {
     process.stdout.write(`${body}\n`);
     process.stderr.write('Dry run only. No GitHub request was made.\n');
@@ -511,7 +623,7 @@ async function main(args) {
   const config = await resolvePublisherConfig(process.env);
   const approval = await resolvePostApproval(process.env, config);
   process.stderr.write(`Posting approved by ${approval === 'label' ? 'PR opt-in label' : 'PR_COMMENT_APPROVED'}.\n`);
-  const result = await publishReviewComment(review, config);
+  const result = await publishReviewComment(review, config, fetch, { ...context, repository: config.repository });
   const destination = result.url ? ': ' + result.url : '.';
   console.log(`GitHub PR comment ${result.action} on ${config.repository}#${config.pullRequestNumber} with ${review.findings.length} warning(s)${destination}`);
 }
