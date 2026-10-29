@@ -1,10 +1,12 @@
+// Dependency-free so it runs from the installed plugin cache with `node` (22.18+ strips types natively).
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
-import { Ajv2020, type AnySchema } from 'ajv/dist/2020.js';
 import { pathToFileURL } from 'node:url';
 
-const schemaUrl = new URL('../plugins/hipaa-p2-review/references/review-result.schema.json', import.meta.url);
-const reviewSchema = JSON.parse(await fs.readFile(schemaUrl, 'utf8')) as AnySchema;
-const validateReview = new Ajv2020({ allErrors: true }).compile(reviewSchema);
+type JsonSchema = Record<string, unknown>;
+
+const schemaUrl = new URL('../references/review-result.schema.json', import.meta.url);
+const reviewSchema = JSON.parse(await fs.readFile(schemaUrl, 'utf8')) as JsonSchema;
 const commentMarker = '<!-- healthcare-data-review -->';
 const apiVersion = '2026-03-10';
 const maxInputBytes = 2_000_000;
@@ -30,7 +32,7 @@ interface ReviewFinding {
   human_verification_required: boolean;
 }
 
-interface ReviewResult {
+export interface ReviewResult {
   schema_version: '2.0.0';
   review_status: 'complete' | 'incomplete';
   summary: string;
@@ -54,6 +56,78 @@ export interface PublisherConfig {
 }
 
 type Fetcher = typeof fetch;
+
+// Interprets only the JSON Schema keywords review-result.schema.json uses, and refuses any other
+// keyword so a schema change cannot silently weaken validation.
+const supportedKeywords = new Set([
+  '$schema', 'title', '$defs', '$ref', 'type', 'const', 'enum', 'required', 'additionalProperties',
+  'properties', 'items', 'minLength', 'minimum', 'pattern'
+]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function resolveSchema(schema: JsonSchema): JsonSchema {
+  const ref = schema.$ref;
+  if (typeof ref !== 'string') return schema;
+  const name = ref.startsWith('#/$defs/') ? ref.slice('#/$defs/'.length) : '';
+  const definitions = reviewSchema.$defs;
+  if (!isRecord(definitions) || !isRecord(definitions[name])) throw new Error(`Unsupported schema reference ${ref}.`);
+  return definitions[name];
+}
+
+function matchesType(value: unknown, type: unknown): boolean {
+  switch (type) {
+    case 'object': return isRecord(value);
+    case 'array': return Array.isArray(value);
+    case 'string': return typeof value === 'string';
+    case 'integer': return Number.isInteger(value);
+    case 'boolean': return typeof value === 'boolean';
+    default: throw new Error(`Unsupported schema type ${String(type)}.`);
+  }
+}
+
+function validateAgainstSchema(value: unknown, rawSchema: JsonSchema, path: string, errors: string[]): void {
+  const schema = resolveSchema(rawSchema);
+  for (const keyword of Object.keys(schema)) {
+    if (!supportedKeywords.has(keyword)) throw new Error(`Unsupported schema keyword ${keyword}.`);
+  }
+  const at = path || '/';
+  if (schema.type !== undefined && !matchesType(value, schema.type)) {
+    errors.push(`${at} must be ${String(schema.type)}`);
+    return;
+  }
+  if ('const' in schema && value !== schema.const) errors.push(`${at} must be equal to constant`);
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) errors.push(`${at} must be equal to one of the allowed values`);
+  if (typeof value === 'string') {
+    if (typeof schema.minLength === 'number' && Array.from(value).length < schema.minLength) {
+      errors.push(`${at} must NOT have fewer than ${schema.minLength} characters`);
+    }
+    if (typeof schema.pattern === 'string' && !new RegExp(schema.pattern, 'u').test(value)) {
+      errors.push(`${at} must match pattern "${schema.pattern}"`);
+    }
+  }
+  if (typeof value === 'number' && typeof schema.minimum === 'number' && value < schema.minimum) {
+    errors.push(`${at} must be >= ${schema.minimum}`);
+  }
+  if (Array.isArray(value) && isRecord(schema.items)) {
+    value.forEach((item, index) => validateAgainstSchema(item, schema.items as JsonSchema, `${path}/${index}`, errors));
+  }
+  if (isRecord(value)) {
+    const properties = isRecord(schema.properties) ? schema.properties : {};
+    for (const key of Array.isArray(schema.required) ? schema.required as string[] : []) {
+      if (!(key in value)) errors.push(`${at} must have required property '${key}'`);
+    }
+    for (const [key, child] of Object.entries(value)) {
+      if (isRecord(properties[key])) {
+        validateAgainstSchema(child, properties[key], `${path}/${key}`, errors);
+      } else if (schema.additionalProperties === false) {
+        errors.push(`${at} must NOT have additional properties`);
+      }
+    }
+  }
+}
 
 function escapeMarkdown(value: string): string {
   const markdownCharacters = new Set(['\\', '`', '*', '_', '{', '}', '[', ']', '(', ')', '#', '+', '-', '.', '!', '~', '|']);
@@ -183,13 +257,58 @@ export function assertPostApproval(approved: string | undefined): void {
 }
 
 export function parseReviewResult(input: unknown): ReviewResult {
-  if (!validateReview(input)) {
-    const errorSummary = (validateReview.errors ?? [])
-      .map((error) => `${error.instancePath || '/'} ${error.message ?? 'is invalid'}`)
-      .join('; ');
-    throw new Error(`Review JSON failed schema validation: ${errorSummary}`);
+  const errors: string[] = [];
+  validateAgainstSchema(input, reviewSchema, '', errors);
+  if (errors.length > 0) {
+    throw new Error(`Review JSON failed schema validation: ${errors.join('; ')}`);
   }
   return input as ReviewResult;
+}
+
+export function repositoryFromRemote(remoteUrl: string): string | undefined {
+  const withoutCredentials = remoteUrl.trim().replace(/^https?:\/\/[^@/]+@/, 'https://');
+  const match = withoutCredentials.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/]+\/[^/]+?)(?:\.git)?\/?$/);
+  return match?.[1];
+}
+
+function readOriginRemote(): string {
+  try {
+    return execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return '';
+  }
+}
+
+// Fills gaps the platform did not configure: repository from a github.com origin, token from
+// GITHUB_TOKEN, and the comment author from the token's own identity. Explicit env always wins.
+export async function resolvePublisherConfig(
+  env: NodeJS.ProcessEnv,
+  fetcher: Fetcher = fetch,
+  readRemote: () => string = readOriginRemote
+): Promise<PublisherConfig> {
+  const config: PublisherConfig = {
+    token: env.GH_TOKEN || env.GITHUB_TOKEN || '',
+    repository: env.GITHUB_REPOSITORY || repositoryFromRemote(readRemote()) || '',
+    pullRequestNumber: Number(env.PR_NUMBER),
+    expectedAuthor: env.GH_COMMENT_AUTHOR_LOGIN ?? '',
+    ...(env.GITHUB_API_URL ? { apiUrl: env.GITHUB_API_URL } : {})
+  };
+  if (!config.repository) {
+    throw new Error('Set GITHUB_REPOSITORY=owner/repo; it could not be derived from a github.com origin remote.');
+  }
+  if (!config.expectedAuthor.trim() && config.token.trim()) {
+    try {
+      const user = await requestJson<{ login?: string }>(new URL('user', getApiBase(config.apiUrl)), {
+        method: 'GET',
+        headers: apiHeaders(config.token)
+      }, fetcher);
+      config.expectedAuthor = user.login ?? '';
+    } catch {
+      throw new Error('Set GH_COMMENT_AUTHOR_LOGIN; the token identity could not be read from GET /user.');
+    }
+  }
+  validatePublisherConfig(config);
+  return config;
 }
 
 export async function publishReviewComment(
@@ -255,7 +374,7 @@ async function main(args: string[]): Promise<void> {
   const post = args.includes('--post');
   const positional = args.filter((arg) => arg !== '--post');
   if (positional.length !== 1) {
-    throw new Error('Usage: npm run publish:pr-comment -- [--post] <review.json|->');
+    throw new Error('Usage: node publish-pr-comment.mts [--post] <review.json|->');
   }
 
   const input = JSON.parse(await readInput(positional[0])) as unknown;
@@ -268,16 +387,10 @@ async function main(args: string[]): Promise<void> {
   }
   assertPostApproval(process.env.PR_COMMENT_APPROVED);
 
-  const config: PublisherConfig = {
-    token: process.env.GH_TOKEN ?? '',
-    repository: process.env.GITHUB_REPOSITORY ?? '',
-    pullRequestNumber: Number(process.env.PR_NUMBER),
-    expectedAuthor: process.env.GH_COMMENT_AUTHOR_LOGIN ?? '',
-    ...(process.env.GITHUB_API_URL ? { apiUrl: process.env.GITHUB_API_URL } : {})
-  };
+  const config = await resolvePublisherConfig(process.env);
   const result = await publishReviewComment(review, config);
   const destination = result.url ? ': ' + result.url : '.';
-  console.log('GitHub PR comment ' + result.action + destination);
+  console.log(`GitHub PR comment ${result.action} on ${config.repository}#${config.pullRequestNumber} with ${review.findings.length} warning(s)${destination}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

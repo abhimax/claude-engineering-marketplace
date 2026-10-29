@@ -36,6 +36,10 @@ function createFixture(): { root: string; pluginRoot: string } {
   write('plugins/synthetic-review/references/review-policy.md', 'Synthetic policy placeholder.\n');
   write('plugins/synthetic-review/references/finding-format.md', 'Synthetic output contract.\n');
   write('plugins/synthetic-review/references/review-result.schema.json', '{}');
+  write('plugins/synthetic-review/references/pr-comment-publishing.md', 'Synthetic publishing procedure.\n');
+  write('plugins/synthetic-review/scripts/publish-pr-comment.mts', 'export {};\n');
+  write('plugins/synthetic-review/commands/hipaa-review.md', '---\nname: review\ndescription: Synthetic command\n---\nInstructions.\n');
+  write('plugins/synthetic-review/commands/post-hipaa-review.md', '---\nname: post\ndescription: Synthetic command\n---\nInstructions.\n');
   write('plugins/synthetic-review/README.md', 'Synthetic plugin documentation.\n');
   for (const file of [
     'README.md',
@@ -45,7 +49,6 @@ function createFixture(): { root: string; pluginRoot: string } {
     'tests/publish-pr-comment.test.ts',
     'package.json',
     'scripts/validate-marketplace',
-    'scripts/publish-pr-comment.ts',
     '.github/workflows/validate-marketplace.yml'
   ]) write(file, '{}');
   write('tests/fixtures/patient-appointment-synthetic.json', JSON.stringify({
@@ -103,6 +106,16 @@ test('rejects malformed or incomplete agent and skill frontmatter', (context) =>
   const errors = validateMarketplace(fixture.root).join('\n');
   assert.match(errors, /frontmatter must start on the first line/);
   assert.match(errors, /frontmatter requires description/);
+});
+
+test('rejects a plugin missing its publishing command or bundled publisher', (context) => {
+  const fixture = createFixture();
+  context.after(() => fs.rmSync(fixture.root, { recursive: true, force: true }));
+  fs.rmSync(path.join(fixture.pluginRoot, 'commands', 'hipaa-review.md'));
+  fs.rmSync(path.join(fixture.pluginRoot, 'scripts', 'publish-pr-comment.mts'));
+  const errors = validateMarketplace(fixture.root).join('\n');
+  assert.match(errors, /commands\/hipaa-review\.md: required Markdown file is missing/);
+  assert.match(errors, /scripts\/publish-pr-comment\.mts: required file is missing/);
 });
 
 test('accepts a review result that follows the documented output schema', () => {

@@ -9,7 +9,7 @@
       "name": "hipaa-p2-review",
       "source": "./plugins/hipaa-p2-review",
       "displayName": "Healthcare Privacy and Access Review",
-      "description": "Six-area healthcare PR risk review with optional human-approved GitHub comment publishing."
+      "description": "Six-area healthcare PR risk review that posts its report as a human-approved GitHub PR comment."
     }
   ]
 }

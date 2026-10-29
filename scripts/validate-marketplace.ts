@@ -121,6 +121,8 @@ function validateFrontmatter(filePath: string, root: string, errors: string[]): 
 function validatePluginComponents(root: string, pluginRoot: string, errors: string[]): void {
   validateFrontmatter(path.join(pluginRoot, 'agents', 'hipaa-p2-reviewer.md'), root, errors);
   validateFrontmatter(path.join(pluginRoot, 'skills', 'review-healthcare-pr', 'SKILL.md'), root, errors);
+  validateFrontmatter(path.join(pluginRoot, 'commands', 'hipaa-review.md'), root, errors);
+  validateFrontmatter(path.join(pluginRoot, 'commands', 'post-hipaa-review.md'), root, errors);
 }
 
 function validatePluginFiles(pluginRoot: string, errors: string[]): void {
@@ -128,6 +130,8 @@ function validatePluginFiles(pluginRoot: string, errors: string[]): void {
     'references/review-policy.md',
     'references/finding-format.md',
     'references/review-result.schema.json',
+    'references/pr-comment-publishing.md',
+    'scripts/publish-pr-comment.mts',
     'README.md'
   ]) {
     requireFile(pluginRoot, relativePath, errors);
@@ -165,7 +169,6 @@ function validateRepositoryFiles(root: string, errors: string[]): void {
     'tests/fixtures/patient-appointment-synthetic.json',
     'package.json',
     'scripts/validate-marketplace',
-    'scripts/publish-pr-comment.ts',
     '.github/workflows/validate-marketplace.yml'
   ]) {
     requireFile(root, relativePath, errors);

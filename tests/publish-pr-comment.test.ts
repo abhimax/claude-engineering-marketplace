@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
+import { Ajv2020, type AnySchema } from 'ajv/dist/2020.js';
 import {
   assertPostApproval,
   parseReviewResult,
   publishReviewComment,
   renderReviewComment,
+  repositoryFromRemote,
+  resolvePublisherConfig,
   validatePublisherConfig,
   type PublisherConfig
-} from '../scripts/publish-pr-comment.ts';
+} from '../plugins/hipaa-p2-review/scripts/publish-pr-comment.mts';
 
 const sampleReview = parseReviewResult({
   schema_version: '2.0.0',
@@ -153,4 +157,96 @@ test('does not modify another author comment that contains the marker', async ()
   assert.equal(result.action, 'created');
   assert.ok(calls.includes('POST'));
   assert.ok(!calls.includes('PATCH'));
+});
+
+test('built-in schema validation agrees with Ajv for valid and mutated results', () => {
+  const schema = JSON.parse(fs.readFileSync(new URL('../plugins/hipaa-p2-review/references/review-result.schema.json', import.meta.url), 'utf8')) as AnySchema;
+  const ajvValidate = new Ajv2020({ allErrors: true }).compile(schema);
+  const finding = sampleReview.findings[0];
+  const candidates: unknown[] = [
+    sampleReview,
+    { ...sampleReview, findings: [] },
+    { ...sampleReview, review_status: 'incomplete' },
+    { ...sampleReview, schema_version: '1.0.0' },
+    { ...sampleReview, review_status: 'done' },
+    { ...sampleReview, summary: '' },
+    { ...sampleReview, extra: true },
+    { ...sampleReview, uncertainties: [1] },
+    { ...sampleReview, findings: [{ ...finding, id: 'HPR-1' }] },
+    { ...sampleReview, findings: [{ ...finding, alert: 'error' }] },
+    { ...sampleReview, findings: [{ ...finding, category: 'generic_security' }] },
+    { ...sampleReview, findings: [{ ...finding, confidence: 'certain' }] },
+    { ...sampleReview, findings: [{ ...finding, severity: 'P2' }] },
+    { ...sampleReview, findings: [{ ...finding, human_verification_required: 'yes' }] },
+    { ...sampleReview, findings: [{ ...finding, location: { ...finding.location, start_line: 0 } }] },
+    { ...sampleReview, findings: [{ ...finding, location: { ...finding.location, end_line: 1.5 } }] },
+    { ...sampleReview, findings: [{ ...finding, location: { path: 'a.ts', start_line: 1 } }] },
+    { ...sampleReview, findings: [{ ...finding, location: { ...finding.location, column: 3 } }] },
+    { ...sampleReview, findings: ['not-an-object'] },
+    [],
+    null
+  ];
+  for (const candidate of candidates) {
+    const expected = ajvValidate(candidate);
+    let actual = true;
+    try {
+      parseReviewResult(candidate);
+    } catch {
+      actual = false;
+    }
+    assert.equal(actual, expected, JSON.stringify(candidate));
+  }
+});
+
+test('derives owner/repository only from github.com remotes and strips credentials', () => {
+  assert.equal(repositoryFromRemote('https://github.com/example/healthcare-api.git\n'), 'example/healthcare-api');
+  assert.equal(repositoryFromRemote('git@github.com:example/healthcare-api.git'), 'example/healthcare-api');
+  assert.equal(repositoryFromRemote('ssh://git@github.com/example/healthcare-api'), 'example/healthcare-api');
+  assert.equal(repositoryFromRemote('https://x-access-token:synthetic@github.com/example/healthcare-api.git'), 'example/healthcare-api');
+  assert.equal(repositoryFromRemote('https://dev.azure.com/org/project/_git/repo'), undefined);
+  assert.equal(repositoryFromRemote(''), undefined);
+});
+
+test('resolves missing repository and comment author without overriding explicit config', async () => {
+  const requested: string[] = [];
+  const fakeFetch: typeof fetch = async (input, init) => {
+    const request = new Request(input, init);
+    requested.push(`${request.method} ${request.url}`);
+    if (request.url === 'https://api.github.com/user') return jsonResponse({ login: 'healthcare-review-bot' });
+    throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+  };
+
+  const resolved = await resolvePublisherConfig(
+    { GITHUB_TOKEN: 'synthetic-test-token', PR_NUMBER: '42' },
+    fakeFetch,
+    () => 'git@github.com:example/healthcare-api.git'
+  );
+  assert.deepEqual(resolved, { ...baseConfig });
+  assert.deepEqual(requested, ['GET https://api.github.com/user']);
+
+  const explicit = await resolvePublisherConfig({
+    GH_TOKEN: 'synthetic-test-token',
+    GITHUB_REPOSITORY: 'example/other-repo',
+    PR_NUMBER: '7',
+    GH_COMMENT_AUTHOR_LOGIN: 'configured-bot'
+  }, fakeFetch, () => 'git@github.com:example/healthcare-api.git');
+  assert.equal(explicit.repository, 'example/other-repo');
+  assert.equal(explicit.expectedAuthor, 'configured-bot');
+  assert.equal(requested.length, 1);
+});
+
+test('fails closed when repository or author identity cannot be resolved', async () => {
+  const failingFetch: typeof fetch = async () => jsonResponse({ message: 'Resource not accessible' }, 403);
+  await assert.rejects(
+    resolvePublisherConfig({ GH_TOKEN: 'synthetic-test-token', PR_NUMBER: '42' }, failingFetch, () => 'https://gitlab.com/example/repo.git'),
+    /GITHUB_REPOSITORY=owner\/repo/
+  );
+  await assert.rejects(
+    resolvePublisherConfig({ GH_TOKEN: 'synthetic-test-token', PR_NUMBER: '42', GITHUB_REPOSITORY: 'example/healthcare-api' }, failingFetch),
+    /GH_COMMENT_AUTHOR_LOGIN/
+  );
+  await assert.rejects(
+    resolvePublisherConfig({ PR_NUMBER: '42', GITHUB_REPOSITORY: 'example/healthcare-api' }, failingFetch),
+    /token is required/
+  );
 });
