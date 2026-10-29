@@ -8,7 +8,8 @@
     {
       "name": "hipaa-p2-review",
       "source": "./plugins/hipaa-p2-review",
-      "description": "Report-only healthcare security and organization-policy code review aid."
+      "displayName": "Healthcare Privacy and Access Review",
+      "description": "Report-only PR warnings for exposed credentials, PHI/PII leakage, test data, encryption, endpoint access, and dependency/vendor risks."
     }
   ]
 }

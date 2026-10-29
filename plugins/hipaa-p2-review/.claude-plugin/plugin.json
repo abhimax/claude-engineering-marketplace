@@ -1,7 +1,8 @@
 {
   "name": "hipaa-p2-review",
-  "version": "0.1.0",
-  "description": "Report-only healthcare security and organization-policy code review aid for backend changes.",
+  "displayName": "Healthcare Privacy and Access Review",
+  "version": "0.2.0",
+  "description": "Report-only PR warnings for six PHI/privacy and health-data access risk areas.",
   "author": {
     "name": "Engineering Organization"
   }

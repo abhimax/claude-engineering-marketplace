@@ -1,6 +1,6 @@
 # Claude Engineering Marketplace
 
-A private, version-controlled catalog for reusable Claude Code plugins. The initial `hipaa-p2-review` plugin provides a read-only, report-only healthcare code-review aid for Patient and Appointment service changes. It complements the existing PR Review Agent; it does not replace it or prove HIPAA compliance.
+A private, version-controlled catalog for reusable Claude Code plugins. The initial `hipaa-p2-review` plugin (display name: Healthcare Privacy and Access Review) provides read-only, report-only PR warnings for six areas: hardcoded secrets/credentials, PHI/PII leakage, apparent production patient data in tests, encryption enforcement, API endpoint access control, and dependency/SCA/BAA context. It complements the existing PR Review Agent; it does not replace it or prove HIPAA compliance. The legacy install ID is retained for compatibility; no severity levels are assigned.
 
 ## Architecture
 
@@ -55,7 +55,7 @@ For a one-session local load without installing:
 claude --plugin-dir ./plugins/hipaa-p2-review
 ```
 
-The agent is namespaced `hipaa-p2-review:hipaa-p2-reviewer`; the skill is `/hipaa-p2-review:review-healthcare-pr`. Use only approved synthetic inputs. Behavior evaluations need human-reviewed synthetic test cases before any deployment gate is considered.
+The agent is namespaced `hipaa-p2-review:hipaa-p2-reviewer`; the skill is `/hipaa-p2-review:review-healthcare-pr`. The identifier remains unchanged for install compatibility. Use only approved synthetic inputs. Behavior evaluations need human-reviewed synthetic test cases before any deployment gate is considered.
 
 ## Add and Install the Local Marketplace
 
@@ -108,14 +108,14 @@ Proposed adapter contract, not implemented here:
 
 - **Input**: pull-request identifier and base/head revisions; changed paths; unified diff; and bounded, relevant surrounding code/configuration needed to validate data flow. The adapter labels all repository content as untrusted, excludes secrets/PHI where possible, and records missing or truncated context.
 - **Execution**: use only an organization-approved runtime and model/data-processing arrangement. Invoke this plugin or an explicitly approved equivalent; do not grant production-system access. Keep the existing PR Review Agent independent and preserve its current behavior.
-- **Output**: one JSON result following `plugins/hipaa-p2-review/references/review-result.schema.json`. Validate JSON and schema before storing or displaying; reject malformed output, preserve `incomplete` status, redact sensitive material, and record the policy version used. Never infer P2 while the approved P2 criteria are absent.
+- **Output**: one JSON result following `plugins/hipaa-p2-review/references/review-result.schema.json` (`schema_version` `2.0.0`). Validate JSON and schema before storing or displaying; reject malformed output, preserve `incomplete` status, and redact sensitive material. Findings contain warning, evidence status, category, location, evidence, risk, and recommendation. The contract has no severity field; update connected platform validators before deploying plugin version `0.2.0`.
 - **Publication**: initial mode is report-only for a human reviewer. No merge blocking, automatic approval, or GitHub PR comment publishing is implemented. Any later GitHub publisher needs separately approved app permissions, identity, comment/update behavior, retry/idempotency rules, failure policy, audit events, and human escalation.
 
 The adapter must define bounded retries and timeouts, fail safely to a visible incomplete/error result, protect logs from PHI and secrets, and record traceable audit events without retaining unnecessary source content. The platform owner must approve these details before processing real pull-request code.
 
 ## Known Limitations
 
-- P2 is a placeholder until the organization supplies approved criteria; production severity classification is not ready.
+- This reviewer does not assign severity levels. Its warnings are limited to the six areas listed above.
 - The plugin prompts a code-review agent but does not itself fetch PR diffs, call GitHub, validate generated JSON at runtime, or publish findings.
 - Official CLI validation checks package structure/frontmatter, not the quality or completeness of the model's review.
 - Local marketplace installation, GitHub-hosted private access, and Claude organization synchronization are distinct distribution mechanisms.

@@ -12,7 +12,7 @@
   ],
   "properties": {
     "schema_version": {
-      "const": "1.0.0"
+      "const": "2.0.0"
     },
     "review_status": {
       "enum": ["complete", "incomplete"]
@@ -40,15 +40,15 @@
       "additionalProperties": false,
       "required": [
         "id",
+        "alert",
         "category",
-        "severity",
-        "severity_rationale",
+        "evidence_status",
         "confidence",
         "title",
         "location",
         "evidence",
-        "impact",
-        "remediation",
+        "risk",
+        "recommendation",
         "human_verification_required"
       ],
       "properties": {
@@ -56,27 +56,21 @@
           "type": "string",
           "pattern": "^HPR-[0-9]{3,}$"
         },
+        "alert": {
+          "const": "warning"
+        },
         "category": {
           "enum": [
-            "phi_exposure",
-            "authentication_authorization",
-            "object_level_authorization",
-            "service_to_service_access",
-            "sensitive_data_handling",
-            "secrets_management",
-            "injection_input_handling",
-            "data_integrity_tenant_isolation",
-            "missing_security_control",
-            "other"
+            "hardcoded_secret_credential",
+            "phi_pii_leakage",
+            "unmasked_test_data",
+            "encryption_enforcement",
+            "endpoint_access_control",
+            "dependency_sca_baa"
           ]
         },
-        "severity": {
-          "type": ["string", "null"],
-          "minLength": 1
-        },
-        "severity_rationale": {
-          "type": "string",
-          "minLength": 1
+        "evidence_status": {
+          "enum": ["confirmed", "potential"]
         },
         "confidence": {
           "enum": ["high", "medium", "low"]
@@ -108,11 +102,11 @@
           "type": "string",
           "minLength": 1
         },
-        "impact": {
+        "risk": {
           "type": "string",
           "minLength": 1
         },
-        "remediation": {
+        "recommendation": {
           "type": "string",
           "minLength": 1
         },

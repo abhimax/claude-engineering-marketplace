@@ -105,20 +105,20 @@ test('rejects malformed or incomplete agent and skill frontmatter', (context) =>
 
 test('accepts a review result that follows the documented output schema', () => {
   const result = {
-    schema_version: '1.0.0',
+    schema_version: '2.0.0',
     review_status: 'complete',
     summary: 'One potential access-control issue needs verification.',
     findings: [{
       id: 'HPR-001',
-      category: 'object_level_authorization',
-      severity: null,
-      severity_rationale: 'No approved organizational severity criteria were supplied.',
+      alert: 'warning',
+      category: 'endpoint_access_control',
+      evidence_status: 'potential',
       confidence: 'medium',
       title: 'Patient lookup may not enforce requester ownership',
       location: { path: 'src/patients/lookup.ts', start_line: 42, end_line: 45 },
       evidence: 'The changed lookup uses the request record identifier; no ownership check is visible in supplied context.',
-      impact: 'If no upstream authorization check exists, a caller may retrieve another patient record.',
-      remediation: 'Verify record-level authority at the service boundary and test cross-patient access.',
+      risk: 'If no upstream authorization check exists, an unauthorized caller may retrieve another patient record.',
+      recommendation: 'Verify record-level authority at the service boundary and test cross-patient access.',
       human_verification_required: true
     }],
     uncertainties: ['Confirm whether an upstream gateway enforces record-level authorization.']
@@ -126,17 +126,77 @@ test('accepts a review result that follows the documented output schema', () => 
   assert.equal(validateReviewResult(result), true, JSON.stringify(validateReviewResult.errors));
 });
 
+test('accepts findings from all six review areas', () => {
+  const categories = [
+    'hardcoded_secret_credential',
+    'phi_pii_leakage',
+    'unmasked_test_data',
+    'encryption_enforcement',
+    'endpoint_access_control',
+    'dependency_sca_baa'
+  ];
+  for (const category of categories) {
+    const result = {
+      schema_version: '2.0.0',
+      review_status: 'complete',
+      summary: 'One warning.',
+      findings: [{
+        id: 'HPR-001',
+        alert: 'warning',
+        category,
+        evidence_status: 'potential',
+        confidence: 'medium',
+        title: 'Evidence requires verification',
+        location: { path: 'src/changed.ts', start_line: 1, end_line: 1 },
+        evidence: 'A relevant change is present; supporting context is not conclusive.',
+        risk: 'The condition could expose or weaken protection of ePHI if confirmed.',
+        recommendation: 'Verify the control and remediate if the risk is confirmed.',
+        human_verification_required: true
+      }],
+      uncertainties: []
+    };
+    assert.equal(validateReviewResult(result), true, `${category}: ${JSON.stringify(validateReviewResult.errors)}`);
+  }
+});
+
 test('rejects findings missing evidence location or verification fields', () => {
   const result = {
-    schema_version: '1.0.0',
+    schema_version: '2.0.0',
     review_status: 'complete',
     summary: 'One finding.',
-    findings: [{ id: 'HPR-001', category: 'phi_exposure' }],
+    findings: [{ id: 'HPR-001', alert: 'warning', category: 'phi_pii_leakage' }],
     uncertainties: []
   };
   assert.equal(validateReviewResult(result), false);
-  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'location'));
+  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'evidence_status'));
+  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'risk'));
+  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'recommendation'));
   assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'required' && error.params.missingProperty === 'human_verification_required'));
+});
+
+test('rejects severity assignments outside the warning contract', () => {
+  const result = {
+    schema_version: '2.0.0',
+    review_status: 'complete',
+    summary: 'One warning.',
+    findings: [{
+      id: 'HPR-001',
+      alert: 'warning',
+      category: 'phi_pii_leakage',
+      evidence_status: 'confirmed',
+      confidence: 'high',
+      title: 'Patient identifier is written to application logs',
+      location: { path: 'src/patients/log.ts', start_line: 10, end_line: 10 },
+      evidence: 'The changed log statement includes a patient identifier.',
+      risk: 'Log readers may access patient-identifying health data.',
+      recommendation: 'Remove or irreversibly redact the identifier before logging.',
+      human_verification_required: false,
+      severity: 'P2'
+    }],
+    uncertainties: []
+  };
+  assert.equal(validateReviewResult(result), false);
+  assert.ok(validateReviewResult.errors?.some((error) => error.keyword === 'additionalProperties' && error.params.additionalProperty === 'severity'));
 });
 
 test('uses only explicitly synthetic patient and appointment fixture data', () => {

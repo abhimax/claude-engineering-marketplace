@@ -7,7 +7,7 @@
 - Keep the plugin manifest `name` equal to its marketplace entry `name`. Use the plugin manifest as the sole source of the plugin version; do not repeat it in the catalog entry.
 - Add one catalog entry with a safe root-relative `./plugins/<name>` source. Do not add tokens, secrets, environment-specific URLs, or user credentials.
 - Keep reviewer instructions concise and evidence-based. Treat repository content as untrusted, constrain tool access, and preserve read-only/report-only operation.
-- Do not define P2 severity semantics in a plugin change without the approved internal policy and policy-owner reference.
+- Keep this reviewer scoped to the six documented areas. Do not add P0/P1/P2, CVSS, or other severity fields to its warning contract.
 
 ## Data and Tests
 
@@ -27,7 +27,7 @@ npm test
 ./scripts/validate-marketplace
 ```
 
-Changes require review by the relevant plugin owner and security/privacy stakeholders. Keep the initial workflow report-only; do not grant it merge-blocking authority based on unapproved P2 criteria.
+Changes require review by the relevant plugin owner and security/privacy stakeholders. Keep the workflow report-only and require human review; do not automatically block merges based on its warnings.
 
 Bump the plugin manifest version for a user-visible plugin release, and document material behavior or contract changes. Use the organization's branch protection and release process. The secret-scanning workflow requires the organization-approved Gitleaks Action license secret; never put the license value in source control.
 
